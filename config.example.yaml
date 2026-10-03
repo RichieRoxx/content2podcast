@@ -62,6 +62,13 @@ http:
   connect_timeout: 10
   read_timeout: 30
 
+# HTML sources without a "selector": let the LLM pick the article links of the overview page.
+# The choice is cached per source and page content, an unchanged page costs nothing.
+link_extraction:
+  enabled: false           # default for all selector-less html sources (per source: llm_links)
+  model: null              # optional cheaper model/deployment for this task (azure_foundry)
+  max_candidates: 150      # at most this many links are sent to the model
+
 schedule:
   time: "05:30"            # HH:MM, local time
 

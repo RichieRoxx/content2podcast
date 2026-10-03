@@ -28,6 +28,7 @@ from content2podcast.script.generator import ScriptArticle, generate_script
 from content2podcast.script.models import PodcastScript
 from content2podcast.script.prompt import PromptError
 from content2podcast.sources.discovery import DiscoveryReport, discover
+from content2podcast.sources.llm_links import LinkSelector
 from content2podcast.speech import group_by_segment, plan_script, synthesize_script
 
 log = logging.getLogger(__name__)
@@ -85,6 +86,7 @@ class Pipeline:
     new_guid: Callable[[], str] = lambda: str(uuid.uuid4())
     tz: tzinfo | None = None  # "calendar day" for the digest guard; None = the system time zone
     should_stop: Callable[[], bool] = lambda: False  # checked between episodes (daemon shutdown)
+    link_selector: LinkSelector | None = None  # LLM link picking for selector-less html sources
 
     # --- one article ---------------------------------------------------------------------
 
@@ -376,6 +378,8 @@ class Pipeline:
             self.http,
             max_article_age_days=config.episode.max_article_age_days,
             now=self.now,
+            link_selector=self.link_selector,
+            llm_links_default=config.link_extraction.enabled,
         )
         summary = RunSummary(discovery)
 

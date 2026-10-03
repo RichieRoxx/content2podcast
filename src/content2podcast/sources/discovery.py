@@ -20,6 +20,7 @@ from content2podcast import repository as repo
 from content2podcast.config import SourceConfig
 from content2podcast.sources.filters import url_allowed
 from content2podcast.sources.html import fetch_html
+from content2podcast.sources.llm_links import LinkSelector
 from content2podcast.sources.models import DiscoveredArticle, FetchResult
 from content2podcast.sources.rss import fetch_rss
 
@@ -68,7 +69,38 @@ def _sync_sources(conn: sqlite3.Connection, sources: Sequence[SourceConfig]) -> 
     return {s.name: repo.upsert_source(conn, s.name, s.url, s.type) for s in sources}
 
 
-def _fetch(source: SourceConfig, row: sqlite3.Row, http: httpx.Client) -> FetchResult:
+def _link_picker(
+    source: SourceConfig,
+    row: sqlite3.Row,
+    selector: LinkSelector | None,
+    llm_links_default: bool,
+):
+    """The LLM link picker for a selector-less HTML source, if enabled for it."""
+    wanted = source.llm_links if source.llm_links is not None else llm_links_default
+    if source.selector or not wanted or selector is None:
+        return None
+
+    def pick(html: bytes, page_url: str, encoding: str | None) -> list[DiscoveredArticle]:
+        return selector.select(
+            row["id"],
+            html,
+            page_url,
+            include=source.include,
+            exclude=source.exclude,
+            same_site=source.same_site,
+            encoding=encoding,
+        )
+
+    return pick
+
+
+def _fetch(
+    source: SourceConfig,
+    row: sqlite3.Row,
+    http: httpx.Client,
+    link_selector: LinkSelector | None = None,
+    llm_links_default: bool = False,
+) -> FetchResult:
     if source.type == "html":
         return fetch_html(
             http,
@@ -77,6 +109,7 @@ def _fetch(source: SourceConfig, row: sqlite3.Row, http: httpx.Client) -> FetchR
             include=source.include,
             exclude=source.exclude,
             same_site=source.same_site,
+            link_picker=_link_picker(source, row, link_selector, llm_links_default),
         )
     # Validators are only worth sending once the baseline exists.
     use_validators = row["baseline_at"] is not None
@@ -141,6 +174,8 @@ def discover(
     *,
     max_article_age_days: int = 7,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
+    link_selector: LinkSelector | None = None,
+    llm_links_default: bool = False,
 ) -> DiscoveryReport:
     """Check all enabled sources and store the articles they list.
 
@@ -148,6 +183,9 @@ def discover(
     * unknown article otherwise -> ``pending``, or ``skipped`` if published more than
       ``max_article_age_days`` ago
     * articles are keyed by normalized URL, so the same article from two sources is one row
+
+    HTML sources without ``selector`` use ``link_selector`` (LLM based) when enabled for the
+    source (``llm_links``) or by default (``llm_links_default``).
     """
     source_ids = _sync_sources(conn, sources)
     cutoff = now() - timedelta(days=max_article_age_days)
@@ -163,7 +201,7 @@ def discover(
         try:
             row = repo.get_source(conn, source.name)
             baselining = row["baseline_at"] is None
-            result = _fetch(source, row, http)
+            result = _fetch(source, row, http, link_selector, llm_links_default)
             if result.not_modified:
                 source_report.not_modified = True
             else:

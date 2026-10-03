@@ -13,3 +13,11 @@ sources:
     type: html
     selector: "article h2 a"
     same_site: true           # default; false also keeps links to other sites
+
+  # HTML index page without selector: the LLM picks the article links (needs an llm provider;
+  # llm_links: true enables it for this source, or set link_extraction.enabled in config.yaml)
+  - name: Example Magazine
+    url: https://magazine.example.com/
+    type: html
+    llm_links: true
+    enabled: false

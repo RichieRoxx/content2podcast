@@ -410,3 +410,28 @@ def prune_episode(conn: sqlite3.Connection, episode_id: int) -> None:
 def delete_episode(conn: sqlite3.Connection, episode_id: int) -> None:
     with conn:
         conn.execute("DELETE FROM episodes WHERE id = ?", (episode_id,))
+
+
+def get_link_selection(
+    conn: sqlite3.Connection, source_id: int, content_hash: str
+) -> list[str] | None:
+    """The cached URLs of the LLM's link choice if it was made for exactly this candidate list."""
+    row = conn.execute(
+        "SELECT urls FROM link_selections WHERE source_id = ? AND content_hash = ?",
+        (source_id, content_hash),
+    ).fetchone()
+    return json.loads(row["urls"]) if row else None
+
+
+def set_link_selection(
+    conn: sqlite3.Connection, source_id: int, content_hash: str, urls: list[str]
+) -> None:
+    """Remember the LLM's link choice (one entry per source, replaced on every change)."""
+    with conn:
+        conn.execute(
+            "INSERT INTO link_selections (source_id, content_hash, urls, created_at) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT (source_id) DO UPDATE SET "
+            "content_hash = excluded.content_hash, urls = excluded.urls, "
+            "created_at = excluded.created_at",
+            (source_id, content_hash, json.dumps(urls), utcnow()),
+        )
