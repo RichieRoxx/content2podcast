@@ -28,6 +28,7 @@ from content2podcast.config import (
     resolve_config_path,
 )
 from content2podcast.db import connect, db_path
+from content2podcast.doctor import run_doctor
 from content2podcast.feed import load_feed_episodes, write_feed
 from content2podcast.http import HttpError, make_client
 from content2podcast.lock import RunLocked, run_lock
@@ -648,10 +649,39 @@ def episodes_list(
         typer.echo(line)
 
 
+_STATUS_LABELS = {"ok": "[ ok ]", "info": "[info]", "warn": "[warn]", "fail": "[FAIL]"}
+
+
 @app.command()
-def doctor(ctx: typer.Context) -> None:
-    """Diagnose the environment (ffmpeg, credentials, connectivity)."""
-    _stub(ctx, "doctor")
+def doctor(
+    ctx: typer.Context,
+    online: Annotated[
+        bool,
+        typer.Option(
+            "--online",
+            help="Also send one minimal request to the LLM and the TTS provider "
+            "(costs a few tokens and a second of speech).",
+        ),
+    ] = False,
+) -> None:
+    """Check whether this installation is ready: config, sources, secrets (masked), providers,
+    ffmpeg, directories, database. Read-only; exits 1 if a check fails."""
+    path = resolve_config_path(ctx.obj.config_path)
+    described = (
+        f"config file {path}" if path.is_file() else "no config file (defaults, environment)"
+    )
+    checks = run_doctor(
+        lambda: ctx.obj.config,
+        lambda: ctx.obj.secrets,
+        config_description=described,
+        online=online,
+    )
+    for check in checks:
+        typer.echo(f"{_STATUS_LABELS[check.status]} {check.name}: {check.detail}")
+    counts = {s: sum(c.status == s for c in checks) for s in ("ok", "warn", "fail")}
+    typer.echo(f"Result: {counts['ok']} ok, {counts['warn']} warning(s), {counts['fail']} failed")
+    if counts["fail"]:
+        raise typer.Exit(EXIT_RUNTIME_ERROR)
 
 
 @app.command()

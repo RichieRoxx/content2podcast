@@ -76,6 +76,7 @@ def test_run_options_in_help():
             ["episodes"],
             ["check"],
             ["run"],
+            ["doctor"],
             ["script"],
             ["tts"],
             ["feed", "rebuild"],
@@ -95,7 +96,7 @@ def test_stubs_report_not_implemented(cmd):
 def test_stub_accepts_global_options(tmp_path):
     cfg = tmp_path / "c.yaml"
     cfg.write_text("podcast:\n  title: T\n")
-    result = runner.invoke(app, ["--config", str(cfg), "-vv", "doctor"])
+    result = runner.invoke(app, ["--config", str(cfg), "-vv", "daemon"])
     assert result.exit_code == 0
 
 
