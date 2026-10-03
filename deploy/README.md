@@ -193,6 +193,35 @@ finishes the episode it is working on and exits cleanly (give it time with
 ffmpeg, a dry run with a read-only config, a healthy daemon that stops cleanly, an unhealthy one
 without configuration); CI runs it.
 
+## Docker Compose
+
+`deploy/docker-compose.example.yml` runs the daemon together with Caddy (see
+[Serve the files](#serve-the-files)); both share the `podcast-site` volume. Copy it next to a
+`config/` directory (`config.yaml`, `sources.yaml`), the `.env` with the credentials and
+`Caddyfile.example`:
+
+```sh
+cp deploy/docker-compose.example.yml docker-compose.yml
+cp deploy/Caddyfile.example .
+docker compose up -d --build         # or set PODCAST_IMAGE to a published image
+docker compose ps                    # the podcast service shows its health
+```
+
+Settings (shell or a compose `.env`): `PODCAST_IMAGE` (default `content2podcast:local`),
+`PODCAST_PORT` (default `8080`), `TZ` (default `Europe/Berlin`). One-off commands share the
+volumes:
+
+```sh
+docker compose exec podcast podcast run --dry-run
+docker compose run --rm podcast doctor --online
+```
+
+If you prefer a timer on the host over the built-in scheduler, override the command with
+`podcast run` and start it from cron or a systemd timer via `docker compose run --rm podcast run`.
+
+`deploy/smoke-compose.sh IMAGE` brings the stack up against a built image, waits for the healthy
+daemon, fetches the feed through Caddy and runs `down -v`; CI runs it.
+
 ## Update and uninstall
 
 ```sh
