@@ -32,9 +32,16 @@ from content2podcast.feed import load_feed_episodes, write_feed
 from content2podcast.http import HttpError, make_client
 from content2podcast.lock import RunLocked, run_lock
 from content2podcast.logging_setup import setup_logging
+from content2podcast.pipeline import Pipeline
 from content2podcast.providers.llm.base import LLMError, LLMProvider
 from content2podcast.providers.registry import ProviderNotConfiguredError, build_llm, build_tts
-from content2podcast.providers.tts.base import NEUTRAL, TTSError, TTSOptions, allowed_styles
+from content2podcast.providers.tts.base import (
+    NEUTRAL,
+    TTSError,
+    TTSOptions,
+    TTSProvider,
+    allowed_styles,
+)
 from content2podcast.script.adhoc import fetch_article
 from content2podcast.script.dryrun import dry_run as run_dry_run
 from content2podcast.script.dryrun import dry_run_root
@@ -194,21 +201,32 @@ def _checked_sources(workspace: Workspace, name: str | None) -> list[SourceConfi
     return sources
 
 
-def _llm_and_styles(ctx: typer.Context, config: AppConfig) -> tuple[LLMProvider, list[str]]:
-    """The configured LLM and the speaking styles the TTS provider supports for both voices."""
+def _providers(
+    ctx: typer.Context, config: AppConfig, *, need_tts: bool
+) -> tuple[LLMProvider, TTSProvider | None, list[str]]:
+    """The configured LLM, the TTS provider and the speaking styles it supports for both voices.
+
+    Without a ``tts`` section the TTS provider is ``None`` and only the ``neutral`` style is
+    offered (fine for scripts only); with ``need_tts`` a missing section is an error.
+    """
     try:
         secrets = ctx.obj.secrets
         llm = build_llm(config.llm, secrets)
-        if config.tts is None:
+        if config.tts is None and not need_tts:
             typer.echo(
                 "Note: no tts provider configured; scripts will only use the 'neutral' style.",
                 err=True,
             )
-            return llm, [NEUTRAL]
+            return llm, None, [NEUTRAL]
         tts = build_tts(config.tts, secrets)
     except (ProviderNotConfiguredError, ConfigError) as exc:
         raise _fail(str(exc), EXIT_CONFIG_ERROR) from None
-    return llm, allowed_styles(tts, config.roles.host.voice, config.roles.expert.voice)
+    return llm, tts, allowed_styles(tts, config.roles.host.voice, config.roles.expert.voice)
+
+
+def _llm_and_styles(ctx: typer.Context, config: AppConfig) -> tuple[LLMProvider, list[str]]:
+    llm, _, styles = _providers(ctx, config, need_tts=False)
+    return llm, styles
 
 
 def _speaker_names(config: AppConfig) -> dict[str, str]:
@@ -301,6 +319,36 @@ def _dry_run(ctx: typer.Context) -> None:
         raise typer.Exit(EXIT_RUNTIME_ERROR)
 
 
+def _full_run(ctx: typer.Context, force: bool) -> None:
+    with _workspace(ctx) as workspace:
+        config = workspace.config
+        llm, tts, styles = _providers(ctx, config, need_tts=True)
+        try:
+            find_tools()  # fail before any article is touched (and its attempts burned)
+        except AudioError as exc:
+            raise _fail(str(exc), EXIT_RUNTIME_ERROR) from None
+        with make_client(config.http) as http:
+            pipeline = Pipeline(config, workspace.conn, http, llm, tts, styles)
+            try:
+                summary = pipeline.run(workspace.sources.sources, force=force)
+            except PromptError as exc:
+                raise _fail(str(exc), EXIT_CONFIG_ERROR) from None
+    for source_report in summary.discovery.sources:
+        _print_check_line(source_report)
+    for result in summary.results:
+        if result.error:
+            typer.echo(f"FAILED {result.title}: {result.error}")
+        else:
+            typer.echo(f"Published {result.episode_title} (from {result.title})")
+    typer.echo(
+        f"Run finished: {len(summary.published)} published, {len(summary.failed)} failed, "
+        f"{summary.pruned} pruned, {summary.discovery.errors} source error(s), "
+        f"{summary.duration_s:.0f} s"
+    )
+    if summary.exit_code:
+        raise typer.Exit(summary.exit_code)
+
+
 @app.command()
 def run(
     ctx: typer.Context,
@@ -313,17 +361,20 @@ def run(
         ),
     ] = False,
     force: Annotated[
-        bool, typer.Option("--force", help="Reprocess already seen articles.")
+        bool,
+        typer.Option(
+            "--force", help="Retry articles that failed or were skipped (baseline stays as is)."
+        ),
     ] = False,
 ) -> None:
-    """Fetch new articles and generate episodes."""
+    """Fetch new articles and publish an episode for each."""
     config = _load(ctx)
     try:
         with run_lock(config.paths.data_dir):
             if dry_run:
                 _dry_run(ctx)
             else:
-                typer.echo("run: not implemented yet")
+                _full_run(ctx, force)
     except RunLocked as exc:
         raise _fail(f"Cannot start: {exc}", RunLocked.exit_code) from None
 

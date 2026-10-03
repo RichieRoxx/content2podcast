@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 from content2podcast.db import utcnow
@@ -140,11 +140,36 @@ def list_articles(conn: sqlite3.Connection, status: str | None = None) -> list[s
     return conn.execute("SELECT * FROM articles WHERE status = ? ORDER BY id", (status,)).fetchall()
 
 
+def record_article_failure(
+    conn: sqlite3.Connection, article_id: int, error: str, *, max_attempts: int
+) -> str:
+    """Count a failed processing attempt (any stage); ``failed`` once ``max_attempts`` is
+    reached. Returns the resulting status."""
+    return record_extraction_failure(conn, article_id, error, max_attempts=max_attempts)
+
+
+def requeue_articles(
+    conn: sqlite3.Connection, statuses: Sequence[str] = ("failed", "skipped")
+) -> int:
+    """Put articles with the given statuses back to ``pending`` (attempts and error reset).
+    Returns how many were requeued."""
+    marks = ", ".join("?" for _ in statuses)
+    with conn:
+        cur = conn.execute(
+            "UPDATE articles SET status = 'pending', attempts = 0, last_error = NULL "
+            f"WHERE status IN ({marks})",
+            tuple(statuses),
+        )
+    return cur.rowcount
+
+
 def list_pending_articles(conn: sqlite3.Connection, limit: int | None = None) -> list[sqlite3.Row]:
-    """Pending articles (oldest first) with their source name as ``source_name``."""
+    """Pending articles, oldest first (by publication, else discovery time), with their source
+    name as ``source_name``."""
     sql = (
         "SELECT a.*, s.name AS source_name FROM articles a "
-        "JOIN sources s ON s.id = a.source_id WHERE a.status = 'pending' ORDER BY a.id"
+        "JOIN sources s ON s.id = a.source_id WHERE a.status = 'pending' "
+        "ORDER BY COALESCE(a.published_at, a.discovered_at), a.id"
     )
     if limit is not None:
         return conn.execute(sql + " LIMIT ?", (limit,)).fetchall()
@@ -229,6 +254,55 @@ def create_episode(
         conn.executemany(
             "INSERT INTO episode_articles (episode_id, article_id, role) VALUES (?, ?, ?)",
             [(episode_id, article_id, role) for article_id, role in articles],
+        )
+    return episode_id
+
+
+def record_published_episode(
+    conn: sqlite3.Connection,
+    *,
+    guid: str,
+    mode: str,
+    title: str,
+    summary: str | None,
+    script: Any,
+    audio_file: str,
+    audio_bytes: int,
+    duration_s: float,
+    articles: Iterable[tuple[int, str]],
+) -> int:
+    """Create a ``published`` episode with the next number, link its articles and mark the
+    ``discussed`` ones ``processed`` -- all in one transaction. Returns the episode id."""
+    articles = list(articles)
+    now = utcnow()
+    with conn:
+        number = conn.execute("SELECT COALESCE(MAX(number), 0) + 1 FROM episodes").fetchone()[0]
+        cur = conn.execute(
+            "INSERT INTO episodes (guid, mode, number, title, summary, script_json, status, "
+            "audio_file, audio_bytes, duration_s, created_at, published_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'published', ?, ?, ?, ?, ?)",
+            (
+                guid,
+                mode,
+                number,
+                title,
+                summary,
+                None if script is None else json.dumps(script, ensure_ascii=False),
+                audio_file,
+                audio_bytes,
+                duration_s,
+                now,
+                now,
+            ),
+        )
+        episode_id = cur.lastrowid
+        conn.executemany(
+            "INSERT INTO episode_articles (episode_id, article_id, role) VALUES (?, ?, ?)",
+            [(episode_id, article_id, role) for article_id, role in articles],
+        )
+        conn.executemany(
+            "UPDATE articles SET status = 'processed', last_error = NULL WHERE id = ?",
+            [(article_id,) for article_id, role in articles if role == "discussed"],
         )
     return episode_id
 
