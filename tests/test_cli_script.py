@@ -282,11 +282,26 @@ def test_script_command_rejects_unknown_mode(project):
 
 
 @respx.mock
-def test_script_command_daily_digest_without_template_is_a_config_error(project):
+def test_script_command_daily_digest_makes_one_script_for_all_urls(project):
     respx.get(NEW_URL).mock(return_value=httpx.Response(200, content=ARTICLE_HTML))
-    result = invoke("script", NEW_URL, "--mode", "daily_digest", "-o", str(project / "out"))
+    respx.get(NEW_URL_2).mock(return_value=httpx.Response(200, content=ARTICLE_HTML))
+    out = project / "out"
+    result = invoke("script", NEW_URL, NEW_URL_2, "--mode", "daily_digest", "-o", str(out))
+    assert result.exit_code == 0, result.output
+    [script_json] = list(out.glob("*/script.json"))
+    sources = json.loads(script_json.read_text(encoding="utf-8"))["sources"]
+    assert [s["url"] for s in sources] == [NEW_URL, NEW_URL_2]
+
+
+@respx.mock
+def test_script_command_missing_template_is_a_config_error(project):
+    (project / "config.yaml").write_text(
+        (project / "config.yaml").read_text() + "podcast:\n  language: fr-FR\n"
+    )
+    respx.get(NEW_URL).mock(return_value=httpx.Response(200, content=ARTICLE_HTML))
+    result = invoke("script", NEW_URL, "-o", str(project / "out"))
     assert result.exit_code == 2
-    assert "daily_digest_de.md" in result.output
+    assert "per_article_fr.md" in result.output
 
 
 def test_script_command_requires_a_url():

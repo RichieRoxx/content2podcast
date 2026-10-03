@@ -188,8 +188,9 @@ def build_prompts(
 ) -> Prompts:
     """Render the system and user prompt for ``articles``.
 
-    The word budget follows the (truncated) article text; ``styles`` is the list allowed by the
-    TTS provider. ``mode`` defaults to ``episode.mode``.
+    The word budget follows the (truncated) article text, or ``episode.target_minutes`` for a
+    daily digest; ``styles`` is the list allowed by the TTS provider. ``mode`` defaults to
+    ``episode.mode``.
     """
     episode = config.episode
     mode = mode or episode.mode
@@ -197,8 +198,13 @@ def build_prompts(
     system_tpl, user_tpl = load_template(mode, config.podcast.language, episode.prompts_dir)
 
     blocks = [format_article(a, episode.max_chars_per_article) for a in articles]
-    words = sum(len(truncate_text(a.text, episode.max_chars_per_article).split()) for a in articles)
-    target_words = word_budget(words, episode)
+    if mode == "daily_digest":  # a fixed length, independent of how much there is to read
+        target_words = round(episode.target_minutes * episode.words_per_minute)
+    else:
+        words = sum(
+            len(truncate_text(a.text, episode.max_chars_per_article).split()) for a in articles
+        )
+        target_words = word_budget(words, episode)
     roles = config.roles
     values = {
         "podcast_title": config.podcast.title,

@@ -270,6 +270,24 @@ def find_draft_for_article(conn: sqlite3.Connection, article_id: int) -> sqlite3
     ).fetchone()
 
 
+def latest_draft(conn: sqlite3.Connection, mode: str) -> sqlite3.Row | None:
+    """The newest draft episode of ``mode``."""
+    return conn.execute(
+        "SELECT * FROM episodes WHERE status = 'draft' AND mode = ? ORDER BY id DESC LIMIT 1",
+        (mode,),
+    ).fetchone()
+
+
+def latest_published_at(conn: sqlite3.Connection, mode: str) -> str | None:
+    """Publication time of the newest published episode of ``mode``."""
+    row = conn.execute(
+        "SELECT MAX(published_at) FROM episodes WHERE status IN ('published', 'pruned') "
+        "AND mode = ?",
+        (mode,),
+    ).fetchone()
+    return row[0]
+
+
 def stale_drafts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     """Drafts that can no longer be continued: no discussed article, or one of them is not
     ``pending`` any more."""
@@ -294,7 +312,8 @@ def publish_draft_episode(
     before_commit: Callable[[], None] | None = None,
 ) -> int:
     """Publish a draft in **one** transaction: the episode becomes ``published`` with the next
-    number, its ``discussed`` articles become ``processed``, then ``before_commit`` runs (it
+    number, its linked articles (``discussed`` and ``mentioned``) become ``processed``, then
+    ``before_commit`` runs (it
     sees the new state through the same connection, e.g. to write the feed). If it raises, the
     whole transaction is rolled back. Returns the episode number."""
     with conn:
@@ -308,7 +327,7 @@ def publish_draft_episode(
             raise ValueError(f"Episode {episode_id} is not a draft")
         conn.execute(
             "UPDATE articles SET status = 'processed', last_error = NULL WHERE id IN ("
-            "SELECT article_id FROM episode_articles WHERE episode_id = ? AND role = 'discussed')",
+            "SELECT article_id FROM episode_articles WHERE episode_id = ?)",
             (episode_id,),
         )
         if before_commit is not None:
