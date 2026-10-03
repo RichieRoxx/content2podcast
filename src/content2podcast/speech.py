@@ -6,6 +6,7 @@ import hashlib
 import logging
 import os
 import re
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -114,12 +115,22 @@ def _synthesize_part(tts: TTSProvider, work_dir: Path, key: str, part: SpeechPar
     return target
 
 
+def group_by_segment(parts: Sequence[SpeechPart], paths: Sequence[Path]) -> list[list[Path]]:
+    """Audio files per spoken segment (several if a segment was split), in spoken order."""
+    groups: dict[int, list[Path]] = {}
+    for part, path in zip(parts, paths, strict=True):
+        groups.setdefault(part.segment_index, []).append(path)
+    return [groups[index] for index in sorted(groups)]
+
+
 def synthesize_script(
     script: PodcastScript,
     tts: TTSProvider,
     roles: RolesConfig,
     work_dir: Path,
     cfg: TTSOptions,
+    *,
+    parts: Sequence[SpeechPart] | None = None,
 ) -> list[Path]:
     """Audio files for ``script`` in spoken order, aligned with :func:`plan_script`.
 
@@ -128,8 +139,10 @@ def synthesize_script(
     * at most ``cfg.concurrency`` requests run at once; the order of the result is preserved
     * if the script is longer than ``cfg.max_chars_per_episode`` characters, a
       :class:`CostGuardError` is raised *before* any request
+
+    Pass ``parts`` (from :func:`plan_script`) to reuse a plan you already have.
     """
-    parts = plan_script(script, tts, roles)
+    parts = list(parts) if parts is not None else plan_script(script, tts, roles)
     total_chars = sum(len(p.text) for p in parts)
     if total_chars > cfg.max_chars_per_episode:
         raise CostGuardError(
