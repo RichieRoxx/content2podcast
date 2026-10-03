@@ -1,0 +1,14 @@
+sources:
+  # RSS/Atom feed
+  - name: Example Blog
+    url: https://example.com/feed.xml
+    type: rss
+    include: ["(?i)python"]   # optional: only titles/URLs matching any of these
+    exclude: ["(?i)sponsored"]
+    enabled: true
+
+  # HTML index page; the selector picks the article links
+  - name: Example News
+    url: https://news.example.com/
+    type: html
+    selector: "article h2 a"
