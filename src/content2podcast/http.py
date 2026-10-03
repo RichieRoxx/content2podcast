@@ -75,7 +75,7 @@ def parse_retry_after(
     return max(0.0, (when - now()).total_seconds())
 
 
-def _loggable(url: str) -> str:
+def loggable_url(url: str) -> str:
     """URL without query/fragment, so keys passed as parameters never reach the logs."""
     parts = urlsplit(url)
     return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
@@ -106,13 +106,13 @@ def request_with_retry(
             response = client.request(method, url, **kwargs)
         except httpx.TransportError as exc:
             reason = type(exc).__name__
-            failure = HttpError(f"{method} {_loggable(url)} failed: {reason}", url=url)
+            failure = HttpError(f"{method} {loggable_url(url)} failed: {reason}", url=url)
             failure.__cause__ = exc
         else:
             if response.status_code < 400:
                 return response
             error = HttpError(
-                f"{method} {_loggable(url)} returned HTTP {response.status_code}",
+                f"{method} {loggable_url(url)} returned HTTP {response.status_code}",
                 url=url,
                 status=response.status_code,
                 body=response.text,
@@ -135,7 +135,7 @@ def request_with_retry(
                 attempt=attempt,
                 max_attempts=max_attempts,
                 method=method,
-                url=_loggable(url),
+                url=loggable_url(url),
                 reason=reason,
                 delay=f"{delay:.1f}s",
             ),

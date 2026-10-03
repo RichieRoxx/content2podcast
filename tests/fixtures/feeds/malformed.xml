@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Broken & unescaped</title>
+    <link>https://bad.example.com/</link>
+    <description>x</description>
+    <item>
+      <title>Still there</title>
+      <link>https://bad.example.com/a</link>
+      <description>5 < 6 & more</description>
+    </item>
+    <item>
+      <title>Second</title>
+      <link>https://bad.example.com/b</link>
+    </item>
+  </channel>
