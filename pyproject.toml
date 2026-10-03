@@ -10,6 +10,7 @@ dependencies = [
     "filelock>=4.0.9",
     "httpx>=0.27",
     "lxml>=6.1.3",
+    "openai>=3.24.0",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "pyyaml>=6.0",

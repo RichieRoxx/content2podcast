@@ -131,7 +131,7 @@ def test_unknown_provider_lists_available(tmp_path):
         config_from(tmp_path, "llm:\n  provider: nope\n")
     msg = str(exc.value)
     assert "llm: Unknown llm provider 'nope'" in msg
-    assert "Available: fake" in msg
+    assert "Available: azure_foundry, fake" in msg
 
 
 def test_missing_provider_key(tmp_path):

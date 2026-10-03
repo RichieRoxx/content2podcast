@@ -64,8 +64,14 @@ schedule:
   time: "05:30"            # HH:MM, local time
 
 # Providers, selected by "provider". Optional until the pipeline needs them.
-# Available now: "fake" (deterministic, for tests and dry runs). Azure providers follow.
+# Available now: llm "azure_foundry" (credentials AZURE_FOUNDRY_* in .env) and "fake"
+# (deterministic, for tests and dry runs). The Azure Speech TTS provider follows.
 # llm:
-#   provider: fake
+#   provider: azure_foundry
+#   model: gpt-5.4            # deployment name
+#   reasoning_effort: low     # optional: none | minimal | low | medium | high
+#   max_completion_tokens: 16000
+#   timeout_s: 120
+#   max_retries: 2
 # tts:
 #   provider: fake
