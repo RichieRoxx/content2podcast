@@ -11,6 +11,7 @@ import typer
 
 from content2podcast import __version__
 from content2podcast.config import AppConfig, ConfigError, load_config
+from content2podcast.lock import RunLocked, run_lock
 from content2podcast.logging_setup import setup_logging
 
 EXIT_OK = 0
@@ -114,7 +115,12 @@ def run(
     ] = False,
 ) -> None:
     """Fetch new articles and generate episodes."""
-    _stub(ctx, "run")
+    config = _load(ctx)
+    try:
+        with run_lock(config.paths.data_dir):
+            typer.echo("run: not implemented yet")
+    except RunLocked as exc:
+        raise _fail(f"Cannot start: {exc}", RunLocked.exit_code) from None
 
 
 @app.command()
