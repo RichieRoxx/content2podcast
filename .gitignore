@@ -1,0 +1,10 @@
+.venv/
+.env
+data/
+public/
+*.db
+*.sqlite3
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+dist/
