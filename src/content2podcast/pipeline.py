@@ -10,7 +10,7 @@ import time
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, tzinfo
 
 import httpx
 
@@ -54,6 +54,7 @@ class RunSummary:
     results: list[EpisodeResult] = field(default_factory=list)
     pruned: int = 0
     duration_s: float = 0.0
+    notes: list[str] = field(default_factory=list)  # e.g. why a digest was not created
 
     @property
     def published(self) -> list[EpisodeResult]:
@@ -82,6 +83,7 @@ class Pipeline:
     assemble: Assembler = assemble_episode
     now: Callable[[], datetime] = lambda: datetime.now(UTC)
     new_guid: Callable[[], str] = lambda: str(uuid.uuid4())
+    tz: tzinfo | None = None  # "calendar day" for the digest guard; None = the system time zone
 
     # --- one article ---------------------------------------------------------------------
 
@@ -171,10 +173,14 @@ class Pipeline:
         )
 
     def _build_and_publish(self, row: sqlite3.Row, title: str, text: str) -> tuple[str, str]:
+        episode_id, guid, relpath, script = self._draft(row, title, text, self.now().date())
+        self._finish(episode_id, guid, relpath, script)
+        return guid, script.title
+
+    def _finish(self, episode_id: int, guid: str, relpath: str, script: PodcastScript) -> None:
+        """Synthesize, assemble and publish a draft (shared by both episode modes)."""
         config = self.config
         now = self.now()
-        episode_id, guid, relpath, script = self._draft(row, title, text, now.date())
-
         work_dir = episode_work_dir(config.paths.data_dir, guid)
         options = (
             config.tts if isinstance(config.tts, TTSOptions) else TTSOptions(provider=self.tts.name)
@@ -219,7 +225,133 @@ class Pipeline:
                 duration=f"{assembled.duration_s:.0f}s",
             ),
         )
-        return guid, script.title
+
+    # --- daily digest --------------------------------------------------------------------
+
+    def _digest_published_today(self) -> bool:
+        last = repo.latest_published_at(self.conn, "daily_digest")
+        if last is None:
+            return False
+        published = datetime.fromisoformat(last.replace("Z", "+00:00")).astimezone(self.tz)
+        return published.date() == self.now().astimezone(self.tz).date()
+
+    def process_digest(
+        self, pending: Sequence[sqlite3.Row], *, force: bool
+    ) -> EpisodeResult | None:
+        """One episode for all pending articles: the newest ``episode.max_articles`` are
+        ``discussed``, the rest ``mentioned`` (show notes only). A draft from an interrupted run
+        is continued. At most one digest is published per calendar day unless ``force``.
+        Returns None if there was nothing to do."""
+        draft = repo.latest_draft(self.conn, "daily_digest")
+        if draft is None:
+            if not pending:
+                return None
+            if not force and self._digest_published_today():
+                return None
+        today = self.now().date()
+        ids = [r["id"] for r in pending]
+        result = EpisodeResult(ids[0] if ids else 0, "", f"daily digest ({len(pending)} articles)")
+        discussed_ids: list[int] = []
+        try:
+            if draft is not None and draft["script_json"] and draft["audio_file"]:
+                episode_id, guid, relpath = draft["id"], draft["guid"], draft["audio_file"]
+                script = PodcastScript.model_validate_json(draft["script_json"])
+                discussed_ids = [
+                    link["article_id"]
+                    for link in repo.episode_articles(self.conn, episode_id)
+                    if link["role"] == "discussed"
+                ]
+                log.info("Resuming draft digest: %s", kv(guid=guid))
+            else:
+                if draft is not None:
+                    self._discard_draft(draft)
+                built = self._build_digest_draft(pending, today, discussed_ids)
+                if isinstance(built, EpisodeResult):
+                    return built
+                episode_id, guid, relpath, script = built
+            result.url = script.sources[0].url if script.sources else ""
+            self._finish(episode_id, guid, relpath, script)
+            result.guid, result.episode_title = guid, script.title
+        except PromptError:
+            raise
+        except Exception as exc:
+            result.error = f"{type(exc).__name__}: {exc}"
+            result.status = "pending"
+            # only articles the model was given count; unreadable ones were counted on extraction
+            for article_id in discussed_ids:
+                result.status = repo.record_article_failure(
+                    self.conn, article_id, result.error, max_attempts=MAX_ATTEMPTS
+                )
+            log.error("Digest failed: %s", kv(articles=len(discussed_ids), error=result.error))
+            log.debug("Traceback for the digest", exc_info=True)
+        return result
+
+    def _build_digest_draft(
+        self, pending: Sequence[sqlite3.Row], today: date, discussed_ids: list[int]
+    ) -> tuple[int, str, str, PodcastScript] | EpisodeResult:
+        """Pick the articles, fetch their text, generate the script and store the draft. The ids
+        of the articles given to the model are appended to ``discussed_ids`` (so a failure can
+        be booked against them). Returns an ``EpisodeResult`` (failure) if none of the articles
+        has usable text."""
+        episode = self.config.episode
+        newest_first = sorted(
+            pending, key=lambda r: r["published_at"] or r["discovered_at"], reverse=True
+        )
+        chosen, mentioned = (
+            newest_first[: episode.max_articles],
+            newest_first[episode.max_articles :],
+        )
+
+        articles: list[ScriptArticle] = []
+        discussed: list[sqlite3.Row] = []
+        errors: list[str] = []
+        for row in chosen:
+            content = ensure_content(
+                self.conn,
+                self.http,
+                row,
+                min_chars=episode.min_chars_per_article,
+                max_attempts=MAX_ATTEMPTS,
+            )
+            if content.text is None:  # the attempt was counted by ensure_content
+                errors.append(f"{row['url']}: {content.error}")
+                continue
+            discussed.append(row)
+            discussed_ids.append(row["id"])
+            articles.append(
+                ScriptArticle(
+                    url=row["url"],
+                    title=row["title"] or row["url"],
+                    text=content.text,
+                    source=row["source_name"],
+                    published=row["published_at"],
+                )
+            )
+        if not articles:
+            return EpisodeResult(
+                pending[0]["id"],
+                pending[0]["url"],
+                f"daily digest ({len(pending)} articles)",
+                error="no article text: " + "; ".join(errors),
+            )
+
+        script = generate_script(
+            self.llm, articles, self.config, self.styles, today=today, mode="daily_digest"
+        )
+        guid = self.new_guid()
+        relpath = episode_relpath(today, script.title, guid)
+        episode_id = repo.create_episode(
+            self.conn,
+            guid=guid,
+            mode="daily_digest",
+            title=script.title,
+            summary=script.summary,
+            script=script.model_dump(),
+            audio_file=relpath,
+            articles=[(r["id"], "discussed") for r in discussed]
+            + [(r["id"], "mentioned") for r in mentioned],
+        )
+        return episode_id, guid, relpath, script
 
     # --- the run -------------------------------------------------------------------------
 
@@ -246,9 +378,19 @@ class Pipeline:
         )
         summary = RunSummary(discovery)
 
-        pending = repo.list_pending_articles(self.conn, config.episode.max_episodes_per_run)
-        for row in pending:
-            summary.results.append(self.process_article(row))
+        if config.episode.mode == "daily_digest":
+            pending = repo.list_pending_articles(self.conn)
+            result = self.process_digest(pending, force=force)
+            if result is not None:
+                summary.results.append(result)
+            elif pending:
+                summary.notes.append(
+                    "A daily digest was already published today (use --force for another one)"
+                )
+        else:
+            pending = repo.list_pending_articles(self.conn, config.episode.max_episodes_per_run)
+            for row in pending:
+                summary.results.append(self.process_article(row))
 
         report = apply_retention(
             self.conn,

@@ -332,7 +332,7 @@ def test_publish_draft_episode_updates_everything_in_one_go(env):
     assert number == 1 and episode["status"] == "published" and episode["published_at"]
     assert (episode["audio_bytes"], episode["duration_s"]) == (10, 2.5)
     assert repo.get_article(conn, main)["status"] == "processed"
-    assert repo.get_article(conn, side)["status"] == "pending"  # only mentioned
+    assert repo.get_article(conn, side)["status"] == "processed"  # mentioned ones too
 
 
 def test_publish_draft_episode_rolls_back_when_before_commit_raises(env):

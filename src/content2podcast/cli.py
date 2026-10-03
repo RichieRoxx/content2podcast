@@ -335,6 +335,8 @@ def _full_run(ctx: typer.Context, force: bool) -> None:
                 raise _fail(str(exc), EXIT_CONFIG_ERROR) from None
     for source_report in summary.discovery.sources:
         _print_check_line(source_report)
+    for note in summary.notes:
+        typer.echo(f"Note: {note}")
     for result in summary.results:
         if result.error:
             typer.echo(f"FAILED {result.title}: {result.error}")
