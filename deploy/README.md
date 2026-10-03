@@ -67,7 +67,7 @@ sudo -u podcast /opt/content2podcast/.venv/bin/podcast \
     --config /etc/content2podcast/config.yaml doctor --online
 ```
 
-Serve `/srv/podcast` with any web server (a static file server is enough).
+Serve `/srv/podcast` with a static web server, see [Serve the files](#serve-the-files).
 
 ## Enable the timer
 
@@ -99,6 +99,57 @@ sudo -u podcast /opt/content2podcast/.venv/bin/podcast \
 - `OnCalendar=*-*-* 05:30:00` uses the machine's time zone; `Persistent=true` catches up on a
   missed run after the machine was off, `RandomizedDelaySec=5min` spreads the start a little.
   Change the time with `sudo systemctl edit --full podcast.timer`.
+
+## Serve the files
+
+The output directory only contains static files, so any web server works. `Caddyfile.example`
+is a ready-made configuration for [Caddy](https://caddyserver.com/): it serves `/srv/podcast`
+on port 8080 and sets what podcast apps need (`application/rss+xml` for the feed, `audio/mpeg`
+and long-lived caching for the MP3s, range requests for seeking and resuming, no directory
+listings, no dotfiles).
+
+```sh
+sudo apt install caddy
+sudo cp /opt/content2podcast/deploy/Caddyfile.example /etc/caddy/Caddyfile
+sudo systemctl restart caddy
+curl -I http://localhost:8080/feed.xml
+```
+
+Set `feed.base_url` in `config.yaml` to the address the apps use, e.g.
+`http://<lan-ip>:8080`, and run `podcast feed rebuild` to refresh the links in the feed. The
+environment variables `PODCAST_ROOT` (default `/srv/podcast`) and `PODCAST_PORT` (default
+`8080`) change the directory and the port without editing the file.
+
+### HTTPS over Tailscale
+
+Podcast apps on phones usually want HTTPS as soon as the feed is not on the local network.
+Tailscale can issue a certificate for `<machine>.<tailnet>.ts.net` (enable "HTTPS
+Certificates" in the admin console under DNS). Then set `feed.base_url` to
+`https://<machine>.<tailnet>.ts.net`. Two ways:
+
+- **Tailscale terminates TLS** (simplest): keep `Caddyfile.example` and put Tailscale in front
+  of it:
+
+  ```sh
+  tailscale serve --bg --https=443 http://127.0.0.1:8080
+  ```
+
+  If Caddy should only be reachable through Tailscale, change the site address in the
+  Caddyfile from `:8080` to `127.0.0.1:8080`.
+- **Caddy terminates TLS** with Tailscale's certificate: use `Caddyfile.tailscale.example`.
+  Caddy asks `tailscaled` for the certificate, which needs to be allowed for its user:
+
+  ```sh
+  sudo tailscale set --operator=caddy
+  sudo cp /opt/content2podcast/deploy/Caddyfile.tailscale.example /etc/caddy/Caddyfile
+  # set PODCAST_HOST=<machine>.<tailnet>.ts.net for the caddy service, e.g. with
+  # `sudo systemctl edit caddy` (Environment=PODCAST_HOST=...)
+  sudo systemctl restart caddy
+  ```
+
+`deploy/verify-caddy.sh` validates both files with `caddy validate` and smoke-tests the LAN
+one against a real Caddy container (headers, `304`, range requests, hidden files); CI runs it.
+It needs Docker on Linux.
 
 ## Update and uninstall
 
