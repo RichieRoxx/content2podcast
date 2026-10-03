@@ -54,7 +54,7 @@ audio:
   bitrate: 128k
 
 http:
-  user_agent: "content2podcast/0.1 (+https://github.com/RichieRoxx/content2podcast)"
+  user_agent: null         # null = "content2podcast/<version> (+https://github.com/RichieRoxx/content2podcast)"
   connect_timeout: 10
   read_timeout: 30
 
