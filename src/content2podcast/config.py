@@ -111,7 +111,7 @@ class AudioConfig(_Model):
 
 
 class HttpConfig(_Model):
-    user_agent: str = "content2podcast/0.1 (+https://github.com/RichieRoxx/content2podcast)"
+    user_agent: str | None = None  # None: content2podcast/<version> (+repo URL)
     connect_timeout: float = Field(10.0, gt=0)
     read_timeout: float = Field(30.0, gt=0)
 
