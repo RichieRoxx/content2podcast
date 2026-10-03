@@ -240,6 +240,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "trafilatura" },
     { name = "typer" },
+    { name = "tzdata" },
 ]
 
 [package.dev-dependencies]
@@ -262,6 +263,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "trafilatura", specifier = ">=2.3.0" },
     { name = "typer", specifier = ">=0.12" },
+    { name = "tzdata", specifier = ">=2026.4" },
 ]
 
 [package.metadata.requires-dev]

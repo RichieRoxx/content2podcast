@@ -64,39 +64,10 @@ def test_run_options_in_help():
     assert "--dry-run" in out and "--force" in out
 
 
-@pytest.mark.parametrize(
-    "cmd",
-    [
-        c
-        for c in COMMANDS
-        if c
-        not in (
-            ["feed"],
-            ["sources"],
-            ["episodes"],
-            ["check"],
-            ["run"],
-            ["doctor"],
-            ["script"],
-            ["tts"],
-            ["feed", "rebuild"],
-            ["episodes", "list"],
-            ["sources", "list"],
-            ["sources", "baseline"],
-        )
-    ],
-    ids=" ".join,
-)
-def test_stubs_report_not_implemented(cmd):
-    result = runner.invoke(app, cmd)
-    assert result.exit_code == 0
-    assert "not implemented yet" in result.output
-
-
-def test_stub_accepts_global_options(tmp_path):
+def test_commands_accept_global_options(tmp_path):
     cfg = tmp_path / "c.yaml"
     cfg.write_text("podcast:\n  title: T\n")
-    result = runner.invoke(app, ["--config", str(cfg), "-vv", "daemon"])
+    result = runner.invoke(app, ["--config", str(cfg), "-vv", "episodes", "list"])
     assert result.exit_code == 0
 
 

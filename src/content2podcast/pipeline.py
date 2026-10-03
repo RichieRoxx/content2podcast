@@ -84,6 +84,7 @@ class Pipeline:
     now: Callable[[], datetime] = lambda: datetime.now(UTC)
     new_guid: Callable[[], str] = lambda: str(uuid.uuid4())
     tz: tzinfo | None = None  # "calendar day" for the digest guard; None = the system time zone
+    should_stop: Callable[[], bool] = lambda: False  # checked between episodes (daemon shutdown)
 
     # --- one article ---------------------------------------------------------------------
 
@@ -390,6 +391,9 @@ class Pipeline:
         else:
             pending = repo.list_pending_articles(self.conn, config.episode.max_episodes_per_run)
             for row in pending:
+                if self.should_stop():
+                    log.info("Stop requested, leaving the remaining articles for the next run")
+                    break
                 summary.results.append(self.process_article(row))
 
         report = apply_retention(
