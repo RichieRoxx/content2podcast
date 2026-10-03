@@ -33,6 +33,7 @@ episode:
   max_articles: 10
   max_article_age_days: 7
   max_chars_per_article: 8000
+  min_chars_per_article: 300   # shorter extracted text falls back to the feed summary
   max_episodes_per_run: null   # null = off
   gap_ms: 300              # pause between speaker turns
   intro_file: null
