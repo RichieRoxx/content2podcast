@@ -198,3 +198,46 @@ def test_feed_served_as_text_html_is_still_parsed_without_warning(client, caplog
         result = fetch_rss(client, FEED_URL)
     assert len(result.articles) == 2
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def feed_xml(entry: str) -> bytes:
+    return (
+        '<?xml version="1.0"?><rss version="2.0"><channel><title>T</title>'
+        f"<link>https://example.com/</link>{entry}</channel></rss>"
+    ).encode()
+
+
+def test_entry_url_fallbacks():
+    xml = feed_xml(
+        "<item><title>relative</title><link>/posts/1</link></item>"
+        "<item><title>guid url</title><guid>https://example.com/posts/2</guid></item>"
+        "<item><title>guid not a url</title><guid isPermaLink='false'>abc-123</guid></item>"
+        "<item><title>ftp</title><link>ftp://example.com/x</link></item>"
+        "<item><title>none</title></item>"
+    )
+    urls = [a.url for a in parse_feed(xml, "https://example.com/feed.xml")]
+    assert urls == ["https://example.com/posts/1", "https://example.com/posts/2"]
+
+
+def test_summary_falls_back_to_content():
+    atom = (
+        b'<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>T</title>'
+        b"<entry><title>E</title><id>https://example.com/e</id>"
+        b'<link href="https://example.com/e"/><updated>2024-01-01T00:00:00Z</updated>'
+        b'<content type="html">&lt;p&gt;Body &lt;b&gt;text&lt;/b&gt;&lt;/p&gt;</content>'
+        b"</entry></feed>"
+    )
+    (article,) = parse_feed(atom, "https://example.com/feed.xml")
+    assert article.summary == "Body text"
+    assert article.published_at == "2024-01-01T00:00:00Z"
+
+
+def test_unrepresentable_dates_are_ignored():
+    import time
+
+    from content2podcast.sources.rss import _published_at
+
+    assert (
+        _published_at({"published_parsed": time.struct_time((99999, 1, 1, 0, 0, 0, 0, 1, 0))})
+        is None
+    )

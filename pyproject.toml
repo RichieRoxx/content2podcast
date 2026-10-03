@@ -25,6 +25,7 @@ podcast = "content2podcast.cli:app"
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pytest-cov>=7.1.0",
     "respx>=0.21",
     "ruff>=0.6",
 ]
@@ -51,3 +52,12 @@ testpaths = ["tests"]
 markers = [
     "ffmpeg: tests that need ffmpeg on PATH (skipped otherwise)",
 ]
+
+[tool.coverage.run]
+source = ["content2podcast"]
+branch = false
+
+[tool.coverage.report]
+fail_under = 95
+skip_empty = true
+show_missing = true
