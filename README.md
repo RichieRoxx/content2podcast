@@ -99,6 +99,13 @@ sources:
     selector: "article h2 a"
 ```
 
+An HTML source without `selector` can let the LLM choose the article links: set
+`llm_links: true` for the source or `link_extraction.enabled: true` for all of them. The page's
+links (same site, with text, outside navigation, at most `link_extraction.max_candidates`) are
+sent to the model, which answers with the ones that are articles; the answer is cached per
+source and page content, so an unchanged page costs no call. `link_extraction.model` selects a
+cheaper model for this task.
+
 Prefer RSS where a site offers it. `podcast sources list` shows the state of every source,
 `podcast sources baseline` marks everything currently visible as seen.
 

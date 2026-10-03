@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
 from urllib.parse import urljoin, urlsplit
 
@@ -19,6 +19,8 @@ from content2podcast.sources.models import DiscoveredArticle, FetchResult, Sourc
 from content2podcast.sources.normalize import normalize_url
 
 log = logging.getLogger(__name__)
+
+LinkPicker = Callable[[bytes, str, str | None], list[DiscoveredArticle]]
 
 _IGNORED_HREF = re.compile(r"^\s*(#|javascript:|mailto:|tel:|data:)", re.IGNORECASE)
 
@@ -93,26 +95,37 @@ def fetch_html(
     include: Iterable[str] = (),
     exclude: Iterable[str] = (),
     same_site: bool = True,
+    link_picker: LinkPicker | None = None,
 ) -> FetchResult:
     """Fetch an overview page and return the article links found with ``selector``.
 
-    Raises ``SourceError`` when no selector is given. A selector that matches nothing is not an
-    error (the page may be temporarily empty) but logs a warning.
+    Without a selector the ``link_picker`` (``(html, page_url, encoding) -> articles``, e.g. the
+    LLM based one) chooses the links; without both ``SourceError`` is raised. A selector that
+    matches nothing is not an error (the page may be temporarily empty) but logs a warning.
     """
-    if not selector or not selector.strip():
+    has_selector = bool(selector and selector.strip())
+    if not has_selector and link_picker is None:
         raise SourceError(f"selector required for HTML source {loggable_url(url)}")
 
     response = request_with_retry(client, "GET", url)
     page_url = str(response.url)
-    articles = extract_links(
-        response.content,
-        page_url,
-        selector,
-        include=include,
-        exclude=exclude,
-        same_site=same_site,
-        encoding=response.charset_encoding,
-    )
+    if has_selector:
+        assert selector is not None
+        articles = extract_links(
+            response.content,
+            page_url,
+            selector,
+            include=include,
+            exclude=exclude,
+            same_site=same_site,
+            encoding=response.charset_encoding,
+        )
+    else:
+        assert link_picker is not None
+        articles = link_picker(response.content, page_url, response.charset_encoding)
     if not articles:
-        log.warning("No article links found: %s", kv(url=loggable_url(page_url), selector=selector))
+        log.warning(
+            "No article links found: %s",
+            kv(url=loggable_url(page_url), selector=selector or "(llm)"),
+        )
     return FetchResult(articles=articles)

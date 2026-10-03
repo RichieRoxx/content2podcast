@@ -95,6 +95,14 @@ class EpisodeConfig(_Model):
         return self
 
 
+class LinkExtractionConfig(_Model):
+    """LLM-based article-link extraction for HTML sources without ``selector``."""
+
+    enabled: bool = False  # default for all selector-less HTML sources, see SourceConfig.llm_links
+    model: str | None = None  # model/deployment for this task, default: the llm provider's own
+    max_candidates: int = Field(150, gt=0)
+
+
 class RoleConfig(_Model):
     name: str
     voice: str
@@ -168,6 +176,7 @@ class AppConfig(BaseSettings):
     roles: RolesConfig = RolesConfig()
     audio: AudioConfig = AudioConfig()
     http: HttpConfig = HttpConfig()
+    link_extraction: LinkExtractionConfig = LinkExtractionConfig()
     schedule: ScheduleConfig = ScheduleConfig()
     # Discriminated on ``provider``: validated against the options model of the registered
     # provider, see content2podcast.providers. None = not configured.
@@ -321,6 +330,7 @@ class SourceConfig(_Model):
     include: list[str] = []
     exclude: list[str] = []
     same_site: bool = True  # html: only keep links on the page's own site
+    llm_links: bool | None = None  # html without selector: let the LLM pick (None = global)
     enabled: bool = True
 
     @field_validator("include", "exclude")

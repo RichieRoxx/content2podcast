@@ -61,6 +61,7 @@ from content2podcast.script.output import unique_dir, write_script_files
 from content2podcast.script.prompt import PromptError
 from content2podcast.slug import slugify
 from content2podcast.sources.discovery import DiscoveryReport, SourceReport, discover
+from content2podcast.sources.llm_links import LinkSelector
 from content2podcast.sources.models import SourceError
 from content2podcast.speech import group_by_segment, plan_script, synthesize_script
 
@@ -166,13 +167,32 @@ def _select_sources(workspace: Workspace, name: str | None) -> list[SourceConfig
     return selected
 
 
-def _run_discovery(workspace: Workspace, sources: list[SourceConfig]) -> DiscoveryReport:
+def _link_selector(ctx: typer.Context, workspace: Workspace) -> LinkSelector:
+    """LLM link picking for selector-less HTML sources; the LLM is only built when needed."""
+    config = workspace.config
+    options = config.llm
+    if options is not None and config.link_extraction.model and hasattr(options, "model"):
+        options = options.model_copy(update={"model": config.link_extraction.model})
+
+    def factory() -> LLMProvider:
+        return build_llm(options, ctx.obj.secrets)
+
+    return LinkSelector(
+        workspace.conn, factory, max_candidates=config.link_extraction.max_candidates
+    )
+
+
+def _run_discovery(
+    ctx: typer.Context, workspace: Workspace, sources: list[SourceConfig]
+) -> DiscoveryReport:
     with make_client(workspace.config.http) as http:
         return discover(
             workspace.conn,
             sources,
             http,
             max_article_age_days=workspace.config.episode.max_article_age_days,
+            link_selector=_link_selector(ctx, workspace),
+            llm_links_default=workspace.config.link_extraction.enabled,
         )
 
 
@@ -288,7 +308,7 @@ def check(ctx: typer.Context, source: SourceOption = None) -> None:
     baselined. Exits with 1 only if every checked source failed.
     """
     with _workspace(ctx) as workspace:
-        report = _run_discovery(workspace, _checked_sources(workspace, source))
+        report = _run_discovery(ctx, workspace, _checked_sources(workspace, source))
     for source_report in report.sources:
         _print_check_line(source_report)
     _print_summary(report)
@@ -300,7 +320,7 @@ def _dry_run(ctx: typer.Context) -> None:
         config = workspace.config
         llm, styles = _llm_and_styles(ctx, config)
         enabled = [s for s in workspace.sources.sources if s.enabled]
-        report = _run_discovery(workspace, enabled)
+        report = _run_discovery(ctx, workspace, enabled)
         for source_report in report.sources:
             _print_check_line(source_report)
         _print_summary(report)
@@ -343,7 +363,14 @@ def _execute_run(
             raise _fail(str(exc), EXIT_RUNTIME_ERROR) from None
         with make_client(config.http) as http:
             pipeline = Pipeline(
-                config, workspace.conn, http, llm, tts, styles, should_stop=should_stop
+                config,
+                workspace.conn,
+                http,
+                llm,
+                tts,
+                styles,
+                should_stop=should_stop,
+                link_selector=_link_selector(ctx, workspace),
             )
             try:
                 return pipeline.run(workspace.sources.sources, force=force)
@@ -621,7 +648,7 @@ def sources_baseline(
             if reset and row is not None:
                 repo.reset_baseline(workspace.conn, row["id"])
             targets.append(candidate)
-        report = _run_discovery(workspace, targets) if targets else DiscoveryReport()
+        report = _run_discovery(ctx, workspace, targets) if targets else DiscoveryReport()
     for source_report in report.sources:
         if source_report.error:
             typer.echo(f"{source_report.name}: ERROR {source_report.error}")
