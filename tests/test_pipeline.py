@@ -1,124 +1,29 @@
-from datetime import UTC, datetime, timedelta
-from email.utils import format_datetime
-from pathlib import Path
-
 import feedparser
 import httpx
 import pytest
 import respx
 
 from content2podcast import repository as repo
-from content2podcast.audio import AssemblyResult
-from content2podcast.config import AppConfig, SourceConfig
-from content2podcast.db import connect
-from content2podcast.http import make_client
 from content2podcast.layout import episode_work_dir
-from content2podcast.pipeline import MAX_ATTEMPTS, Pipeline, RunSummary
+from content2podcast.pipeline import MAX_ATTEMPTS, RunSummary
 from content2podcast.providers.llm.base import LLMError
 from content2podcast.providers.llm.fake import FakeLLM
-from content2podcast.providers.tts.base import TTSError, allowed_styles
+from content2podcast.providers.tts.base import TTSError
 from content2podcast.providers.tts.fake import FakeTTS
 from content2podcast.script.prompt import PromptError
 from content2podcast.sources.discovery import DiscoveryReport
-
-FIXTURES = Path(__file__).parent / "fixtures" / "articles"
-ARTICLE_HTML = (FIXTURES / "article.html").read_bytes()
-NOW = datetime(2026, 10, 3, 6, 0, tzinfo=UTC)
-FEED = "https://blog.example.com/feed.xml"
-BLOG = SourceConfig(name="Blog", url=FEED)
-
-
-def url(n: int) -> str:
-    return f"https://blog.example.com/posts/{n}"
-
-
-def feed(*items: tuple[int, int]) -> bytes:
-    """Items as ``(post number, age in hours)``."""
-    body = "".join(
-        f"<item><title>Beitrag {n}</title><link>{url(n)}</link>"
-        f"<pubDate>{format_datetime(NOW - timedelta(hours=age))}</pubDate></item>"
-        for n, age in items
-    )
-    return (
-        f'<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>{body}</channel></rss>'
-    ).encode()
-
-
-def canned(title="Folge zum Artikel"):
-    return {
-        "title": title,
-        "summary": "Es geht um Paketmanager.",
-        "segments": [
-            {"speaker": "host", "style": "neutral", "text": "Hallo und willkommen."},
-            {"speaker": "expert", "style": "cheerful", "text": "Schön, dabei zu sein."},
-        ],
-    }
-
-
-class StubAssembler:
-    """Replaces ffmpeg: writes a small fake MP3 and records how it was called."""
-
-    def __init__(self, fail_for: set[str] | None = None):
-        self.calls: list[dict] = []
-        self.fail_for = fail_for or set()
-
-    def __call__(self, segments, output, work_dir, *, cfg, gap_ms, meta, intro=None, outro=None):
-        self.calls.append(
-            {"segments": segments, "output": output, "gap_ms": gap_ms, "meta": meta, "intro": intro}
-        )
-        if meta.title in self.fail_for:
-            raise RuntimeError("assembly exploded")
-        data = b"ID3" + b"\x00" * 100
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(data)
-        return AssemblyResult(output, duration_s=12.5, size_bytes=len(data), measured_lufs=-20.0)
-
-
-@pytest.fixture
-def env(tmp_path):
-    config = AppConfig()
-    config.paths.data_dir = tmp_path / "data"
-    config.paths.output_dir = tmp_path / "public"
-    config.podcast.title = "Mein Podcast"
-    config.feed.base_url = "https://nas.example.ts.net/"
-    conn = connect(tmp_path / "data" / "db.sqlite3")
-    with make_client() as http:
-        yield {"config": config, "conn": conn, "http": http, "tmp": tmp_path}
-    conn.close()
-
-
-def make_pipeline(env, llm=None, tts=None, assembler=None, **kwargs) -> Pipeline:
-    tts = tts or FakeTTS()
-    config = env["config"]
-    return Pipeline(
-        config,
-        env["conn"],
-        env["http"],
-        llm or FakeLLM(canned()),
-        tts,
-        allowed_styles(tts, config.roles.host.voice, config.roles.expert.voice),
-        assemble=assembler or StubAssembler(),
-        now=lambda: NOW,
-        **kwargs,
-    )
-
-
-def baseline(env, pipeline):
-    """First run: the source is baselined with one old post."""
-    respx.get(FEED).mock(return_value=httpx.Response(200, content=feed((0, 24 * 30))))
-    summary = pipeline.run([BLOG])
-    assert summary.results == []
-    return summary
-
-
-def route_posts(*numbers, status=200):
-    for n in numbers:
-        respx.get(url(n)).mock(return_value=httpx.Response(status, content=ARTICLE_HTML))
-
-
-def articles_by_status(conn):
-    return {a["url"]: a["status"] for a in repo.list_articles(conn)}
-
+from pipeline_helpers import (
+    BLOG,
+    FEED,
+    StubAssembler,
+    articles_by_status,
+    baseline,
+    canned,
+    feed,
+    make_pipeline,
+    route_posts,
+    url,
+)
 
 # --- happy path --------------------------------------------------------------------------
 
@@ -299,7 +204,8 @@ def test_tts_and_assembly_failures_are_isolated_too(env):
     exploding = make_pipeline(env, assembler=StubAssembler(fail_for={"Folge zum Artikel"}))
     summary = exploding.run([BLOG])
     assert "assembly exploded" in summary.failed[0].error
-    assert repo.list_episodes(env["conn"]) == []  # nothing half-published
+    assert repo.list_episodes(env["conn"], "published") == []  # nothing half-published
+    assert [e["status"] for e in repo.list_episodes(env["conn"])] == ["draft"]  # resumable
 
 
 @respx.mock
