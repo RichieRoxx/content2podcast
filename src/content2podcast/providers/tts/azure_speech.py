@@ -35,13 +35,14 @@ from content2podcast.http import (
     request_with_retry,
 )
 from content2podcast.logging_setup import kv
-from content2podcast.providers.registry import (
-    ProviderNotConfiguredError,
-    ProviderOptions,
-    register_tts,
-)
+from content2podcast.providers.registry import ProviderNotConfiguredError, register_tts
 from content2podcast.providers.tts.azure_ssml import build_ssml
-from content2podcast.providers.tts.base import AudioChunk, TTSError, VoiceCapabilities
+from content2podcast.providers.tts.base import (
+    AudioChunk,
+    TTSError,
+    TTSOptions,
+    VoiceCapabilities,
+)
 
 log = logging.getLogger(__name__)
 
@@ -89,7 +90,7 @@ def _looks_like_mp3(data: bytes) -> bool:
     return data[:3] == b"ID3" or (len(data) > 1 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0)
 
 
-class AzureSpeechOptions(ProviderOptions):
+class AzureSpeechOptions(TTSOptions):
     provider: Literal["azure_speech"] = "azure_speech"
     region: str | None = None  # default: AZURE_SPEECH_REGION (swedencentral)
     endpoint: str | None = None  # default: AZURE_SPEECH_ENDPOINT, else the regional URL

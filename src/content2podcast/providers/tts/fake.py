@@ -10,8 +10,8 @@ from typing import Literal
 from pydantic import Field
 
 from content2podcast.config import Secrets
-from content2podcast.providers.registry import ProviderOptions, register_tts
-from content2podcast.providers.tts.base import AudioChunk, VoiceCapabilities
+from content2podcast.providers.registry import register_tts
+from content2podcast.providers.tts.base import AudioChunk, TTSOptions, VoiceCapabilities
 
 SAMPLE_RATE = 8000
 SECONDS_PER_CHAR = 0.01
@@ -59,7 +59,7 @@ class FakeTTS:
         return AudioChunk(data=buf.getvalue(), ext="wav")
 
 
-class FakeTTSOptions(ProviderOptions):
+class FakeTTSOptions(TTSOptions):
     provider: Literal["fake"] = "fake"
     styles: list[str] = Field(default_factory=lambda: ["neutral", "cheerful", "serious"])
     voice_styles: dict[str, list[str]] = Field(default_factory=dict)
