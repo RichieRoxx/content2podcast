@@ -74,7 +74,9 @@ Settings come from several layers; later entries win:
 3. `.env` (next to the config file)
 4. environment variables with the `C2P_` prefix and `__` for nesting,
    e.g. `C2P_FEED__BASE_URL=http://my-host:8080`
-5. command line options
+5. command line options: `--set KEY.PATH=VALUE`, repeatable, e.g.
+   `podcast --set feed.base_url=http://my-host:8080 feed rebuild` (values are read like YAML:
+   `true`, `5`, `null`, `[a, b]`)
 
 The config file is taken from `--config`, else `$C2P_CONFIG`, else `./config.yaml`. Relative
 paths inside it are resolved against the config file's directory. Secrets (Azure keys and
@@ -213,7 +215,8 @@ network. Subscribe with "add by URL" using `<base_url>/feed.xml`.
   missing and exits non-zero if a check fails.
 - Logs: `journalctl -u podcast.service -e` (systemd) or `docker compose logs podcast`.
 - `podcast health` says why the daemon is considered unhealthy.
-- Exit code 3 means another run holds the lock; 2 is a configuration error.
+- Exit codes: 1 unexpected runtime error (one `Error:` line, `-v` adds the traceback), 2
+  configuration or usage error, 3 another run holds the lock.
 - Nothing is published for a new source: the first run only sets the baseline; episodes follow
   when new articles appear. `podcast sources list` shows the counts.
 - The feed contains wrong links: fix `feed.base_url`, then `podcast feed rebuild`.

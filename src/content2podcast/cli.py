@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import traceback
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
+from typer.core import TyperGroup
+from typer.exceptions import TyperException
 
 from content2podcast import __version__
 from content2podcast import repository as repo
@@ -26,6 +29,7 @@ from content2podcast.config import (
     load_config,
     load_secrets,
     load_sources,
+    parse_overrides,
     resolve_config_path,
 )
 from content2podcast.db import connect, db_path
@@ -73,7 +77,34 @@ EXIT_CONFIG_ERROR = 2
 
 log = logging.getLogger(__name__)
 
-app = typer.Typer(help="Turn blog and news articles into podcast episodes.", no_args_is_help=True)
+
+class _Group(TyperGroup):
+    """Turns an unexpected exception into one readable line and exit code 1.
+
+    ``-v`` additionally prints the traceback. Usage and configuration errors (their own exit
+    codes), ``typer.Exit``, Ctrl-C and ``SystemExit`` pass through untouched.
+    """
+
+    def invoke(self, ctx: typer.Context):
+        try:
+            return super().invoke(ctx)
+        except (TyperException, typer.Exit, typer.Abort, KeyboardInterrupt):
+            raise
+        except Exception as exc:
+            if getattr(exc, "exit_code", None) is not None:  # a usage error of another click
+                raise
+            if ctx.params.get("verbose", 0):
+                traceback.print_exc()
+            message = str(exc) or "no details"
+            typer.echo(f"Error: {type(exc).__name__}: {message}", err=True)
+            if not ctx.params.get("verbose", 0):
+                typer.echo("Run with -v for the full traceback.", err=True)
+            raise typer.Exit(EXIT_RUNTIME_ERROR) from None
+
+
+app = typer.Typer(
+    cls=_Group, help="Turn blog and news articles into podcast episodes.", no_args_is_help=True
+)
 feed_app = typer.Typer(help="Feed maintenance.", no_args_is_help=True)
 sources_app = typer.Typer(help="Inspect configured sources.", no_args_is_help=True)
 episodes_app = typer.Typer(help="Inspect generated episodes.", no_args_is_help=True)
@@ -87,13 +118,14 @@ class AppContext:
     """Shared CLI state. The config loads on first access (once), so ``--help`` never needs it."""
 
     config_path: Path | None = None
+    overrides: dict[str, Any] = field(default_factory=dict)
     _config: AppConfig | None = field(default=None, repr=False)
     _secrets: Secrets | None = field(default=None, repr=False)
 
     @property
     def config(self) -> AppConfig:
         if self._config is None:
-            self._config = load_config(self.config_path)
+            self._config = load_config(self.config_path, overrides=self.overrides)
         return self._config
 
     @property
@@ -285,6 +317,15 @@ def main(
         ),
     ] = 0,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Only warnings and errors.")] = False,
+    set_: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--set",
+            metavar="KEY=VALUE",
+            help="Override a config value, e.g. --set feed.base_url=http://host:8080 "
+            "(repeatable; beats environment and config.yaml).",
+        ),
+    ] = None,
     version: Annotated[
         bool,
         typer.Option(
@@ -299,7 +340,11 @@ def main(
     if quiet and verbose:
         raise _fail("--quiet and --verbose cannot be combined.", EXIT_CONFIG_ERROR)
     setup_logging(verbose, quiet)
-    ctx.obj = AppContext(config_path=config)
+    try:
+        overrides = parse_overrides(set_ or [])
+    except ConfigError as exc:
+        raise _fail(str(exc), EXIT_CONFIG_ERROR) from None
+    ctx.obj = AppContext(config_path=config, overrides=overrides)
 
 
 @app.command()
