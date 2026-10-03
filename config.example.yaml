@@ -38,16 +38,17 @@ episode:
   gap_ms: 300              # pause between speaker turns
   intro_file: null
   outro_file: null
+  prompts_dir: null        # directory with own <mode>_<lang>.md prompt templates (e.g. per_article_de.md)
 
 roles:
   host:
     name: Mia
     voice: "de-DE-Mia:MAI-Voice-2.1"
-    description: Curious, friendly host.
+    description: Neugierige, freundliche Moderatorin.
   expert:
     name: Klaus
     voice: "de-DE-Klaus:MAI-Voice-2.1"
-    description: Knowledgeable expert.
+    description: Kenntnisreicher Experte, der Zusammenhänge verständlich erklärt.
 
 audio:
   loudness_lufs: -16

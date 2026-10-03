@@ -86,6 +86,7 @@ class EpisodeConfig(_Model):
     gap_ms: int = Field(300, ge=0)
     intro_file: Path | None = None
     outro_file: Path | None = None
+    prompts_dir: Path | None = None  # overrides the packaged <mode>_<lang>.md prompt templates
 
     @model_validator(mode="after")
     def _check_minutes(self) -> EpisodeConfig:
@@ -102,10 +103,14 @@ class RoleConfig(_Model):
 
 class RolesConfig(_Model):
     host: RoleConfig = RoleConfig(
-        name="Mia", voice="de-DE-Mia:MAI-Voice-2.1", description="Curious, friendly host."
+        name="Mia",
+        voice="de-DE-Mia:MAI-Voice-2.1",
+        description="Neugierige, freundliche Moderatorin.",
     )
     expert: RoleConfig = RoleConfig(
-        name="Klaus", voice="de-DE-Klaus:MAI-Voice-2.1", description="Knowledgeable expert."
+        name="Klaus",
+        voice="de-DE-Klaus:MAI-Voice-2.1",
+        description="Kenntnisreicher Experte, der Zusammenhänge verständlich erklärt.",
     )
 
 
@@ -140,6 +145,7 @@ _PATH_FIELDS: tuple[tuple[str, str], ...] = (
     ("podcast", "cover_image"),
     ("episode", "intro_file"),
     ("episode", "outro_file"),
+    ("episode", "prompts_dir"),
 )
 
 
