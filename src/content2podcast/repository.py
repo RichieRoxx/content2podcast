@@ -251,6 +251,20 @@ def list_episodes(conn: sqlite3.Connection, status: str | None = None) -> list[s
     return conn.execute(sql + " ORDER BY published_at DESC, id DESC", args).fetchall()
 
 
+def list_episodes_with_counts(
+    conn: sqlite3.Connection, status: str | None = None
+) -> list[sqlite3.Row]:
+    """Episodes newest first (publish date, or creation date for drafts) with the number of
+    linked articles as ``article_count``."""
+    where, args = ("WHERE e.status = ?", (status,)) if status else ("", ())
+    return conn.execute(
+        "SELECT e.*, COUNT(ea.article_id) AS article_count FROM episodes e "
+        f"LEFT JOIN episode_articles ea ON ea.episode_id = e.id {where} "
+        "GROUP BY e.id ORDER BY COALESCE(e.published_at, e.created_at) DESC, e.id DESC",
+        args,
+    ).fetchall()
+
+
 def episode_articles(conn: sqlite3.Connection, episode_id: int) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT article_id, role FROM episode_articles WHERE episode_id = ? ORDER BY article_id",
