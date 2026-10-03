@@ -258,6 +258,17 @@ def episode_articles(conn: sqlite3.Connection, episode_id: int) -> list[sqlite3.
     ).fetchall()
 
 
+def episode_sources(conn: sqlite3.Connection, episode_id: int) -> list[sqlite3.Row]:
+    """The articles behind an episode with title, url, source name and role
+    (``discussed`` first), for show notes."""
+    return conn.execute(
+        "SELECT a.title, a.url, s.name AS source_name, ea.role FROM episode_articles ea "
+        "JOIN articles a ON a.id = ea.article_id JOIN sources s ON s.id = a.source_id "
+        "WHERE ea.episode_id = ? ORDER BY ea.role = 'mentioned', a.id",
+        (episode_id,),
+    ).fetchall()
+
+
 def publish_episode(
     conn: sqlite3.Connection,
     episode_id: int,

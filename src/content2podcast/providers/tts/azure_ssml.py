@@ -8,11 +8,11 @@ supported style, ``mstts:express-as``. Never ``prosody``, ``break``, ``emphasis`
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Collection
 from xml.sax.saxutils import escape, quoteattr
 
 from content2podcast.logging_setup import kv
+from content2podcast.xmltext import strip_invalid_xml_chars
 
 log = logging.getLogger(__name__)
 
@@ -20,15 +20,7 @@ SSML_NS = "http://www.w3.org/2001/10/synthesis"
 MSTTS_NS = "http://www.w3.org/2001/mstts"
 NEUTRAL = "neutral"
 
-# Everything outside the XML 1.0 ``Char`` production (tab, LF, CR, and the allowed ranges).
-_INVALID_XML_CHARS = re.compile("[^\t\n\r -퟿-�\U00010000-\U0010ffff]")
 _TEXT_ENTITIES = {'"': "&quot;", "'": "&apos;"}
-
-
-def strip_invalid_xml_chars(text: str) -> str:
-    """Remove characters that are not allowed in XML 1.0 documents (control characters, lone
-    surrogates, ``U+FFFE`` / ``U+FFFF``)."""
-    return _INVALID_XML_CHARS.sub("", text)
 
 
 def build_ssml(

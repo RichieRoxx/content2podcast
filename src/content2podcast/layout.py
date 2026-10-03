@@ -64,6 +64,18 @@ def place_file(src: Path, dest: Path) -> Path:
     return dest
 
 
+def write_atomic(dest: Path, data: bytes) -> Path:
+    """Write ``data`` to ``dest`` atomically (temp file in the same directory + ``os.replace``)."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".part")
+    try:
+        tmp.write_bytes(data)
+        os.replace(tmp, dest)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return dest
+
+
 def place_episode(src: Path, output_dir: Path, relpath: str) -> Path:
     """Put a finished MP3 at ``output_dir/relpath``."""
     return place_file(src, output_dir / relpath)
