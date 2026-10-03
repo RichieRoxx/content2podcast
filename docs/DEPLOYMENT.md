@@ -332,7 +332,8 @@ Later entries win:
 2. `config.yaml`
 3. `.env` next to the config file
 4. environment variables `C2P_...` (`__` for nesting), for example `C2P_FEED__BASE_URL=http://host:8080`
-5. command line options
+5. command line options: `--set KEY.PATH=VALUE` (repeatable), for example
+   `podcast --set feed.base_url=http://host:8080 feed rebuild`
 
 The config file is `--config`, else `$C2P_CONFIG`, else `./config.yaml`. Secrets are read from
 the environment or `.env` only, never from `config.yaml`. A configuration error is reported as one
@@ -435,6 +436,8 @@ for Compose, `docker compose down` (add `-v` to delete the volumes, including al
 - **Wrong links in the feed**: fix `feed.base_url`, run `podcast feed rebuild`.
 - **Exit code 3**: another run still holds the lock; harmless, the unit treats it as success.
 - **Exit code 2**: a configuration problem, the message names the key.
+- **Exit code 1** with an `Error:` line: an unexpected runtime error; run again with `-v` for the
+  full traceback.
 - **Permission denied on `.env` / data directory**: bare metal needs the `podcast` user to read
   `/etc/content2podcast/.env` (mode 640, group `podcast`) and write `/var/lib/content2podcast` and
   `/srv/podcast`; Docker with bind mounts needs matching `UID`/`GID` at build time.

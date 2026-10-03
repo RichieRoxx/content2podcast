@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -270,6 +271,39 @@ def _check_top_level(path: Path) -> None:
         raise ConfigError(
             f"Invalid configuration ({path}):\n  unknown top-level key(s): {', '.join(unknown)}"
         )
+
+
+def parse_overrides(items: Sequence[str]) -> dict[str, Any]:
+    """Turn ``KEY.PATH=VALUE`` strings (``--set``) into a nested dict for ``load_config``.
+
+    Values are parsed as YAML scalars/collections, so ``true``, ``5``, ``null`` and ``[a, b]``
+    work like in ``config.yaml``; anything else (also ``a: b``) stays a string. Later items win.
+    """
+    result: dict[str, Any] = {}
+    for item in items:
+        key, sep, raw = item.partition("=")
+        key = key.strip()
+        parts = key.split(".")
+        if not sep or not all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", p) for p in parts):
+            raise ConfigError(
+                f"Invalid --set {item!r}: use KEY.PATH=VALUE, e.g. feed.base_url=http://x"
+            )
+        try:
+            value = yaml.safe_load(raw)
+        except yaml.YAMLError:
+            value = raw
+        if isinstance(value, dict):  # "Hello: World" is a title, not a mapping
+            value = raw
+        node = result
+        for part in parts[:-1]:
+            child = node.setdefault(part, {})
+            if not isinstance(child, dict):
+                raise ConfigError(f"Conflicting --set options for {'.'.join(parts[:-1])!r}")
+            node = child
+        if isinstance(node.get(parts[-1]), dict):
+            raise ConfigError(f"Conflicting --set options for {key!r}")
+        node[parts[-1]] = value
+    return result
 
 
 def load_config(
