@@ -20,6 +20,9 @@ podcast player.
   deterministic `fake` providers for tests and dry runs.
 - **Deployment**: systemd timer (bare metal) or Docker / Compose with a built-in scheduler.
 
+**Setting it up for real?** Follow the [deployment and configuration guide](docs/DEPLOYMENT.md)
+(bare metal and Docker, step by step).
+
 ## How it works
 
 1. **Discover**: new articles are detected in the sources and de-duplicated.
@@ -173,8 +176,9 @@ articles would be processed and to review the scripts without any speech costs, 
 
 ## Deployment
 
-Both variants need a web server for the output directory; see [deploy/README.md](deploy/README.md)
-for the details, the Caddy configurations and HTTPS over Tailscale.
+**Step-by-step guide for both variants, including configuration and operation:
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).** Reference details (unit files, Caddy configurations,
+HTTPS over Tailscale) are in [deploy/README.md](deploy/README.md).
 
 - **Bare metal (Debian 12)**: a systemd timer runs `podcast run` every morning, as an
   unprivileged user with a hardened unit. Install steps: [deploy/README.md](deploy/README.md).
@@ -182,12 +186,12 @@ for the details, the Caddy configurations and HTTPS over Tailscale.
   at `schedule.time`, catch-up after downtime) together with Caddy.
 
   ```sh
-  cp deploy/docker-compose.example.yml docker-compose.yml
-  cp deploy/Caddyfile.example .
-  mkdir config && cp config.example.yaml config/config.yaml && cp sources.example.yaml config/sources.yaml
-  cp .env.example .env                      # add your keys
-  # in config/config.yaml: paths are preset by the image, set feed.base_url and the providers
-  PODCAST_IMAGE=ghcr.io/richieroxx/content2podcast:edge docker compose up -d
+  cd deploy
+  mkdir config
+  cp ../config.example.yaml config/config.yaml    # set feed.base_url and the providers
+  cp ../sources.example.yaml config/sources.yaml
+  cp ../.env.example .env                         # add your keys
+  docker compose -f docker-compose.example.yml up -d --build
   ```
 
   Multi-arch images (amd64, arm64) are published to `ghcr.io/richieroxx/content2podcast`

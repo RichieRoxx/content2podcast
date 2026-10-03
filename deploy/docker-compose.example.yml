@@ -11,7 +11,7 @@
 #
 # Settings (environment variables or a .env file next to this file):
 #   PODCAST_IMAGE  the image to use [content2podcast:local, built from this repository]
-#                  e.g. ghcr.io/richieroxx/content2podcast:latest for a published image
+#                  e.g. ghcr.io/richieroxx/content2podcast:edge for a published image
 #   PODCAST_PORT   the port Caddy is published on [8080]
 #   TZ             time zone for schedule.time [Europe/Berlin]
 #   UID, GID       user the container runs as when building [1000]
