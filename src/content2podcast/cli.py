@@ -28,6 +28,7 @@ from content2podcast.config import (
     resolve_config_path,
 )
 from content2podcast.db import connect, db_path
+from content2podcast.feed import load_feed_episodes, write_feed
 from content2podcast.http import HttpError, make_client
 from content2podcast.lock import RunLocked, run_lock
 from content2podcast.logging_setup import setup_logging
@@ -122,6 +123,17 @@ def _workspace(ctx: typer.Context) -> Iterator[Workspace]:
     conn = connect(db_path(config.paths.data_dir))
     try:
         yield Workspace(config, sources, conn)
+    finally:
+        conn.close()
+
+
+@contextmanager
+def _database(ctx: typer.Context) -> Iterator[tuple[AppConfig, sqlite3.Connection]]:
+    """Config and database only (no sources file needed)."""
+    config = _load(ctx)
+    conn = connect(db_path(config.paths.data_dir))
+    try:
+        yield config, conn
     finally:
         conn.close()
 
@@ -440,8 +452,19 @@ def tts(
 
 @feed_app.command("rebuild")
 def feed_rebuild(ctx: typer.Context) -> None:
-    """Rebuild the RSS feed from stored episodes."""
-    _stub(ctx, "feed rebuild")
+    """Regenerate feed.xml from the database (and copy the cover image)."""
+    with _database(ctx) as (config, conn):
+        episodes = load_feed_episodes(conn)
+        try:
+            path = write_feed(config, conn)
+        except FileNotFoundError as exc:
+            raise _fail(str(exc), EXIT_CONFIG_ERROR) from None
+    missing = [e for e in episodes if not (config.paths.output_dir / e.audio_file).is_file()]
+    for episode in missing:
+        typer.echo(
+            f"Warning: audio file missing for {episode.title!r}: {episode.audio_file}", err=True
+        )
+    typer.echo(f"Feed written to {path} ({len(episodes)} episode(s))")
 
 
 def _table(rows: list[list[str]], header: list[str]) -> list[str]:
@@ -533,10 +556,43 @@ def sources_baseline(
     _exit_if_all_failed(report)
 
 
+def _duration(seconds: float | None) -> str:
+    if seconds is None:
+        return "-"
+    total = int(seconds + 0.5)
+    return f"{total // 60}:{total % 60:02d}"
+
+
+def _shorten(text: str, width: int = 50) -> str:
+    return text if len(text) <= width else text[: width - 1] + "…"
+
+
 @episodes_app.command("list")
-def episodes_list(ctx: typer.Context) -> None:
-    """List generated episodes."""
-    _stub(ctx, "episodes list")
+def episodes_list(
+    ctx: typer.Context,
+    all_: Annotated[
+        bool, typer.Option("--all", help="Include drafts and pruned episodes.")
+    ] = False,
+) -> None:
+    """List published episodes: number, date, title, duration, status, article count."""
+    with _database(ctx) as (_, conn):
+        rows = repo.list_episodes_with_counts(conn, None if all_ else "published")
+    if not rows:
+        typer.echo("No episodes." if all_ else "No published episodes (use --all to see more).")
+        return
+    table = [
+        [
+            str(row["number"]) if row["number"] is not None else "-",
+            (row["published_at"] or row["created_at"])[:10],
+            _shorten(row["title"]),
+            _duration(row["duration_s"]),
+            row["status"],
+            str(row["article_count"]),
+        ]
+        for row in rows
+    ]
+    for line in _table(table, ["NO", "DATE", "TITLE", "DURATION", "STATUS", "ARTICLES"]):
+        typer.echo(line)
 
 
 @app.command()
