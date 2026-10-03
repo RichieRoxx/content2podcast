@@ -151,6 +151,48 @@ Certificates" in the admin console under DNS). Then set `feed.base_url` to
 one against a real Caddy container (headers, `304`, range requests, hidden files); CI runs it.
 It needs Docker on Linux.
 
+## Docker
+
+The image runs `podcast daemon` as an unprivileged user (UID/GID 1000 by default) and contains
+ffmpeg. It has three volumes:
+
+| Volume | Content |
+| --- | --- |
+| `/config` | `config.yaml`, `sources.yaml` and optionally `.env` (mount it read-only) |
+| `/data` | state: database, scratch space, `status.json` |
+| `/srv/podcast` | the published feed and episodes (serve it with a web server) |
+
+The defaults are `C2P_CONFIG=/config/config.yaml`, `C2P_PATHS__DATA_DIR=/data`,
+`C2P_PATHS__OUTPUT_DIR=/srv/podcast` and `TZ=UTC`; set `TZ` to your time zone so that
+`schedule.time` means local time. Credentials can come from an `--env-file` or from
+`/config/.env`.
+
+```sh
+docker build -t content2podcast --build-arg UID=$(id -u) --build-arg GID=$(id -g) .
+
+# check the setup, then see what a run would do without speech synthesis
+docker run --rm -v $PWD/config:/config:ro -v podcast-data:/data --env-file .env \
+    content2podcast doctor --online
+docker run --rm -v $PWD/config:/config:ro -v podcast-data:/data --env-file .env \
+    content2podcast run --dry-run
+
+# run the daemon: one run per day at schedule.time, a catch-up run on start if one was missed
+docker run -d --name podcast --restart unless-stopped -e TZ=Europe/Berlin --env-file .env \
+    -v $PWD/config:/config:ro -v podcast-data:/data -v podcast-site:/srv/podcast \
+    content2podcast
+```
+
+Use the `UID`/`GID` build arguments if you bind-mount host directories, so that the container
+user may write to them. `docker ps` shows the health: the container is healthy while the
+daemon reports a fresh heartbeat and its last run succeeded less than 26 hours ago
+(`podcast health` explains an unhealthy state). `docker stop` sends SIGTERM; the daemon
+finishes the episode it is working on and exits cleanly (give it time with
+`docker stop --time 600` if episodes take long; an interrupted episode is resumed next time).
+
+`deploy/smoke-image.sh IMAGE` checks all of this against a built image (non-root user, version,
+ffmpeg, a dry run with a read-only config, a healthy daemon that stops cleanly, an unhealthy one
+without configuration); CI runs it.
+
 ## Update and uninstall
 
 ```sh
