@@ -1,0 +1,68 @@
+# content2podcast configuration. Every key is optional; values shown are the defaults
+# unless marked otherwise. Precedence: CLI > environment (C2P_FEED__BASE_URL ...) > .env > this file.
+# Relative paths are resolved against the directory of this file.
+
+podcast:
+  title: My Daily Podcast
+  description: Articles turned into podcast episodes.
+  author: Your Name
+  language: de-DE
+  cover_image: cover.jpg   # optional, default: none
+  category: Technology
+  explicit: false
+
+paths:
+  data_dir: data
+  output_dir: public
+  sources_file: sources.yaml
+
+feed:
+  # LAN IP or Tailscale hostname under which podcast apps reach the feed.
+  base_url: http://192.168.1.10:8080
+  retention:
+    max_age_days: 30       # delete episodes older than this
+    max_episodes: null     # keep at most N episodes (null = off)
+
+episode:
+  mode: per_article        # per_article | daily_digest
+  min_minutes: 3
+  max_minutes: 10
+  length_factor: 1.0
+  words_per_minute: 140
+  target_minutes: 15       # daily_digest target length
+  max_articles: 10
+  max_article_age_days: 7
+  max_chars_per_article: 8000
+  max_episodes_per_run: null   # null = off
+  gap_ms: 300              # pause between speaker turns
+  intro_file: null
+  outro_file: null
+
+roles:
+  host:
+    name: Mia
+    voice: "de-DE-Mia:MAI-Voice-2.1"
+    description: Curious, friendly host.
+  expert:
+    name: Klaus
+    voice: "de-DE-Klaus:MAI-Voice-2.1"
+    description: Knowledgeable expert.
+
+audio:
+  loudness_lufs: -16
+  true_peak_db: -1.5
+  bitrate: 128k
+
+http:
+  user_agent: "content2podcast/0.1 (+https://github.com/RichieRoxx/content2podcast)"
+  connect_timeout: 10
+  read_timeout: 30
+
+schedule:
+  time: "05:30"            # HH:MM, local time
+
+# Placeholders; become provider-specific sections in a later milestone step.
+llm:
+  provider: azure
+tts:
+  provider: azure
