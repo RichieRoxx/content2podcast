@@ -1,0 +1,54 @@
+# Caddyfile for serving the podcast over HTTPS inside your tailnet (Tailscale).
+#
+# Podcast apps on phones usually insist on HTTPS once the feed is not on the local network.
+# Tailscale issues a real certificate for <machine>.<tailnet>.ts.net (enable "HTTPS
+# Certificates" in the admin console under DNS first). Set feed.base_url to
+# https://<machine>.<tailnet>.ts.net in config.yaml.
+#
+# Two ways to get HTTPS; see deploy/README.md for the commands.
+#
+#   A) Let Tailscale terminate TLS and keep the plain-HTTP Caddyfile.example on localhost:
+#        tailscale serve --bg --https=443 http://127.0.0.1:8080
+#      Nothing in this file is needed for that.
+#
+#   B) Let Caddy terminate TLS with the certificate Tailscale issues (this file):
+#        sudo tailscale set --operator=caddy        # Caddy may ask tailscaled for certificates
+#        PODCAST_HOST=<machine>.<tailnet>.ts.net caddy run --config deploy/Caddyfile.tailscale.example --adapter caddyfile
+#
+# Settings (environment variables, defaults in brackets):
+#   PODCAST_HOST  the machine's tailnet name [podcast.example.ts.net]
+#   PODCAST_ROOT  directory with the published files [/srv/podcast]
+
+{
+	admin off
+	# Certificates come from Tailscale, not from Let's Encrypt.
+	auto_https disable_redirects
+}
+
+{$PODCAST_HOST:podcast.example.ts.net} {
+	tls {
+		get_certificate tailscale
+	}
+
+	root * {$PODCAST_ROOT:/srv/podcast}
+
+	@feed path /feed.xml
+	header @feed Content-Type "application/rss+xml; charset=utf-8"
+	header @feed Cache-Control "no-cache"
+
+	@audio path *.mp3
+	header @audio Content-Type "audio/mpeg"
+	header @audio Cache-Control "public, max-age=31536000, immutable"
+	header @audio Accept-Ranges "bytes"
+
+	@cover path_regexp cover ^/cover\.(jpg|jpeg|png)$
+	header @cover Cache-Control "public, max-age=3600"
+
+	@text path /feed.xml
+	encode @text gzip zstd
+
+	@hidden path /.* /*/.*
+	respond @hidden 404
+
+	file_server
+}
