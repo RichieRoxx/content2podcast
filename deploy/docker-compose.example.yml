@@ -1,0 +1,50 @@
+# A complete self-hosted podcast: the content2podcast daemon plus Caddy serving the feed.
+#
+#   cd deploy
+#   mkdir config
+#   cp ../config.example.yaml config/config.yaml    # set feed.base_url, llm and tts
+#   cp ../sources.example.yaml config/sources.yaml
+#   cp ../.env.example .env                         # your Azure credentials
+#   docker compose -f docker-compose.example.yml up -d --build
+#
+# The feed is then at http://<this host>:8080/feed.xml. More in deploy/README.md.
+#
+# Settings (environment variables or a .env file next to this file):
+#   PODCAST_IMAGE  the image to use [content2podcast:local, built from this repository]
+#                  e.g. ghcr.io/richieroxx/content2podcast:latest for a published image
+#   PODCAST_PORT   the port Caddy is published on [8080]
+#   TZ             time zone for schedule.time [Europe/Berlin]
+#   UID, GID       user the container runs as when building [1000]
+
+name: content2podcast
+
+services:
+  podcast:
+    image: ${PODCAST_IMAGE:-content2podcast:local}
+    build:
+      context: ..
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    env_file: .env
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+    volumes:
+      - ./config:/config:ro        # config.yaml, sources.yaml (optionally .env)
+      - podcast-data:/data         # database, scratch space, status.json
+      - podcast-site:/srv/podcast  # feed and episodes, shared with Caddy
+    restart: unless-stopped
+    stop_grace_period: 10m         # let the daemon finish the episode it is working on
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "${PODCAST_PORT:-8080}:8080"
+    volumes:
+      - ./Caddyfile.example:/etc/caddy/Caddyfile:ro
+      - podcast-site:/srv/podcast:ro
+    restart: unless-stopped
+
+volumes:
+  podcast-data:
+  podcast-site:
