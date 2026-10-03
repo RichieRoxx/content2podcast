@@ -77,7 +77,7 @@ A configuration error is reported as one readable message and exit code 2.
 ## Deployment
 
 _To do._ Bare metal (systemd timer) and Docker deployment will be documented once the
-pipeline works. A minimal image can already be built with `docker build -t content2podcast .`.
+pipeline works. Images for amd64 and arm64 are published to `ghcr.io/richieroxx/content2podcast` (tags `edge`, version, commit sha); see [deploy/README.md](deploy/README.md).
 
 ## Podcast players
 

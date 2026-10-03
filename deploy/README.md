@@ -167,6 +167,12 @@ The defaults are `C2P_CONFIG=/config/config.yaml`, `C2P_PATHS__DATA_DIR=/data`,
 `schedule.time` means local time. Credentials can come from an `--env-file` or from
 `/config/.env`.
 
+Ready-made multi-arch images (amd64, arm64, e.g. Raspberry Pi) are published to GHCR by
+`.github/workflows/image.yml`: `ghcr.io/richieroxx/content2podcast:edge` follows `main`, release
+tags `vX.Y.Z` publish `X.Y.Z` and `X.Y`, and every build has a `sha-<commit>` tag. They run as UID/GID
+1000; build your own image if you need other IDs. With Compose set
+`PODCAST_IMAGE=ghcr.io/richieroxx/content2podcast:edge`.
+
 ```sh
 docker build -t content2podcast --build-arg UID=$(id -u) --build-arg GID=$(id -g) .
 
