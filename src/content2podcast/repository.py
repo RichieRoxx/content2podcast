@@ -73,6 +73,30 @@ def set_baseline(conn: sqlite3.Connection, source_id: int) -> None:
         )
 
 
+def reset_baseline(conn: sqlite3.Connection, source_id: int) -> None:
+    """Forget the source's baseline (and cache validators) so its next check baselines again;
+    pending articles of the source become ``baseline`` so they are never turned into episodes."""
+    with conn:
+        conn.execute(
+            "UPDATE sources SET baseline_at = NULL, etag = NULL, last_modified = NULL WHERE id = ?",
+            (source_id,),
+        )
+        conn.execute(
+            "UPDATE articles SET status = 'baseline' WHERE source_id = ? AND status = 'pending'",
+            (source_id,),
+        )
+
+
+def article_counts(conn: sqlite3.Connection) -> dict[int, dict[str, int]]:
+    """Article counts by status per source id."""
+    counts: dict[int, dict[str, int]] = {}
+    for row in conn.execute(
+        "SELECT source_id, status, COUNT(*) AS n FROM articles GROUP BY source_id, status"
+    ):
+        counts.setdefault(row["source_id"], {})[row["status"]] = row["n"]
+    return counts
+
+
 # --- articles ----------------------------------------------------------------------------
 
 

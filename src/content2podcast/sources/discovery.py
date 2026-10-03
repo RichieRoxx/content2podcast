@@ -33,10 +33,12 @@ class SourceReport:
     name: str
     new: int = 0  # stored as pending
     baseline: int = 0  # stored as baseline (first successful check)
+    baselined: bool = False  # this check set the source's baseline (possibly with 0 articles)
     skipped: int = 0  # too old, stored as skipped
     known: int = 0  # already in the database (also via another source)
     not_modified: bool = False
     error: str | None = None
+    new_articles: list[DiscoveredArticle] = field(default_factory=list)  # the pending ones
 
 
 @dataclass
@@ -129,6 +131,7 @@ def _store(
             report.skipped += 1
         else:
             report.new += 1
+            report.new_articles.append(article)
 
 
 def discover(
@@ -174,6 +177,7 @@ def discover(
                 )
                 if baselining:
                     repo.set_baseline(conn, source_id)
+                    source_report.baselined = True
             repo.mark_source_checked(
                 conn, source_id, etag=result.etag, last_modified=result.last_modified
             )

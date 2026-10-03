@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated
@@ -10,9 +13,20 @@ from typing import Annotated
 import typer
 
 from content2podcast import __version__
-from content2podcast.config import AppConfig, ConfigError, load_config
+from content2podcast import repository as repo
+from content2podcast.config import (
+    AppConfig,
+    ConfigError,
+    SourceConfig,
+    SourcesConfig,
+    load_config,
+    load_sources,
+)
+from content2podcast.db import connect, db_path
+from content2podcast.http import make_client
 from content2podcast.lock import RunLocked, run_lock
 from content2podcast.logging_setup import setup_logging
+from content2podcast.sources.discovery import DiscoveryReport, SourceReport, discover
 
 EXIT_OK = 0
 EXIT_RUNTIME_ERROR = 1
@@ -61,6 +75,87 @@ def _stub(ctx: typer.Context, name: str) -> None:
     typer.echo(f"{name}: not implemented yet")
 
 
+SourceOption = Annotated[str | None, typer.Option("--source", help="Only this source (by name).")]
+
+
+@dataclass
+class Workspace:
+    config: AppConfig
+    sources: SourcesConfig
+    conn: sqlite3.Connection
+
+
+@contextmanager
+def _workspace(ctx: typer.Context) -> Iterator[Workspace]:
+    """Config, sources file and database; config problems end the command with exit code 2."""
+    config = _load(ctx)
+    try:
+        sources = load_sources(config.paths.sources_file)
+    except ConfigError as exc:
+        raise _fail(str(exc), EXIT_CONFIG_ERROR) from None
+    conn = connect(db_path(config.paths.data_dir))
+    try:
+        yield Workspace(config, sources, conn)
+    finally:
+        conn.close()
+
+
+def _select_sources(workspace: Workspace, name: str | None) -> list[SourceConfig]:
+    sources = workspace.sources.sources
+    if name is None:
+        return list(sources)
+    selected = [s for s in sources if s.name == name]
+    if not selected:
+        known = ", ".join(s.name for s in sources) or "none"
+        raise _fail(f"Unknown source {name!r}. Configured sources: {known}", EXIT_CONFIG_ERROR)
+    return selected
+
+
+def _run_discovery(workspace: Workspace, sources: list[SourceConfig]) -> DiscoveryReport:
+    with make_client(workspace.config.http) as http:
+        return discover(
+            workspace.conn,
+            sources,
+            http,
+            max_article_age_days=workspace.config.episode.max_article_age_days,
+        )
+
+
+def _print_summary(report: DiscoveryReport) -> None:
+    typer.echo(
+        f"Summary: {report.new} new, {report.baseline} baseline, "
+        f"{report.skipped} skipped, {report.errors} error(s)"
+    )
+
+
+def _exit_if_all_failed(report: DiscoveryReport) -> None:
+    """Exit 1 only if every checked source failed."""
+    if report.sources and report.errors == len(report.sources):
+        raise typer.Exit(EXIT_RUNTIME_ERROR)
+
+
+def _print_check_line(source: SourceReport) -> None:
+    if source.error:
+        typer.echo(f"{source.name}: ERROR {source.error}")
+    elif source.not_modified:
+        typer.echo(f"{source.name}: not modified")
+    elif source.baselined:
+        typer.echo(f"{source.name}: baseline set ({source.baseline} existing articles)")
+    else:
+        typer.echo(f"{source.name}: {source.new} new, {source.skipped} skipped")
+    for article in source.new_articles:
+        published = (article.published_at or "no date")[:10]
+        typer.echo(f"  - {article.title or '(no title)'} ({published})")
+        typer.echo(f"    {article.url}")
+
+
+def _checked_sources(workspace: Workspace, name: str | None) -> list[SourceConfig]:
+    sources = _select_sources(workspace, name)
+    if name is not None and not sources[0].enabled:
+        raise _fail(f"Source {name!r} is disabled.", EXIT_CONFIG_ERROR)
+    return sources
+
+
 def _version_callback(value: bool) -> None:
     if value:
         typer.echo(f"content2podcast {__version__}")
@@ -99,9 +194,18 @@ def main(
 
 
 @app.command()
-def check(ctx: typer.Context) -> None:
-    """Validate configuration and sources."""
-    _stub(ctx, "check")
+def check(ctx: typer.Context, source: SourceOption = None) -> None:
+    """Check the sources for new articles and list them.
+
+    Articles found are stored (new ones as pending); a source seen for the first time is only
+    baselined. Exits with 1 only if every checked source failed.
+    """
+    with _workspace(ctx) as workspace:
+        report = _run_discovery(workspace, _checked_sources(workspace, source))
+    for source_report in report.sources:
+        _print_check_line(source_report)
+    _print_summary(report)
+    _exit_if_all_failed(report)
 
 
 @app.command()
@@ -141,16 +245,93 @@ def feed_rebuild(ctx: typer.Context) -> None:
     _stub(ctx, "feed rebuild")
 
 
+def _table(rows: list[list[str]], header: list[str]) -> list[str]:
+    widths = [max(len(r[i]) for r in [header, *rows]) for i in range(len(header))]
+    return [
+        "  ".join(cell.ljust(w) for cell, w in zip(r, widths, strict=True)).rstrip()
+        for r in [header, *rows]
+    ]
+
+
+def _source_state(source: SourceConfig | None) -> str:
+    if source is None:
+        return "removed"  # in the database but no longer configured
+    return "enabled" if source.enabled else "disabled"
+
+
 @sources_app.command("list")
 def sources_list(ctx: typer.Context) -> None:
-    """List configured sources."""
-    _stub(ctx, "sources list")
+    """List sources: state, last check and article counts by status."""
+    with _workspace(ctx) as workspace:
+        rows_by_name = {r["name"]: r for r in repo.list_sources(workspace.conn)}
+        counts = repo.article_counts(workspace.conn)
+    configured = {s.name: s for s in workspace.sources.sources}
+
+    rows: list[list[str]] = []
+    errors: list[str] = []
+    for name in [*configured, *sorted(set(rows_by_name) - set(configured))]:
+        source, row = configured.get(name), rows_by_name.get(name)
+        state = _source_state(source)
+        by_status = counts.get(row["id"], {}) if row else {}
+        rows.append(
+            [
+                name,
+                source.type if source else row["type"],
+                state,
+                (row["baseline_at"] if row else None) or "no",
+                (row["last_checked_at"] if row else None) or "never",
+                (row["last_success_at"] if row else None) or "never",
+                " ".join(f"{k}={v}" for k, v in sorted(by_status.items())) or "-",
+            ]
+        )
+        if row and row["last_error"]:
+            errors.append(f"{name}: {row['last_error']}")
+    header = ["NAME", "TYPE", "STATE", "BASELINE", "LAST CHECK", "LAST SUCCESS", "ARTICLES"]
+    for line in _table(rows, header):
+        typer.echo(line)
+    for error in errors:
+        typer.echo(f"last error - {error}")
 
 
 @sources_app.command("baseline")
-def sources_baseline(ctx: typer.Context) -> None:
-    """Mark all current articles as seen without generating episodes."""
-    _stub(ctx, "sources baseline")
+def sources_baseline(
+    ctx: typer.Context,
+    source: SourceOption = None,
+    reset: Annotated[
+        bool,
+        typer.Option(
+            "--reset",
+            help="Re-baseline sources that already have a baseline (e.g. after a selector "
+            "change); their pending articles become baseline.",
+        ),
+    ] = False,
+) -> None:
+    """Mark everything currently visible in sources without a baseline as seen.
+
+    Nothing is turned into an episode for these articles.
+    """
+    with _workspace(ctx) as workspace:
+        candidates = [s for s in _checked_sources(workspace, source) if s.enabled]
+        targets: list[SourceConfig] = []
+        for candidate in candidates:
+            row = repo.get_source(workspace.conn, candidate.name)
+            has_baseline = row is not None and row["baseline_at"] is not None
+            if has_baseline and not reset:
+                typer.echo(f"{candidate.name}: already baselined (use --reset to redo)")
+                continue
+            if reset and row is not None:
+                repo.reset_baseline(workspace.conn, row["id"])
+            targets.append(candidate)
+        report = _run_discovery(workspace, targets) if targets else DiscoveryReport()
+    for source_report in report.sources:
+        if source_report.error:
+            typer.echo(f"{source_report.name}: ERROR {source_report.error}")
+        else:
+            known = f", {source_report.known} already known" if source_report.known else ""
+            typer.echo(
+                f"{source_report.name}: baseline set ({source_report.baseline} articles{known})"
+            )
+    _exit_if_all_failed(report)
 
 
 @episodes_app.command("list")
