@@ -106,7 +106,9 @@ sent to the model, which answers with the ones that are articles; the answer is 
 source and page content, so an unchanged page costs no call. `link_extraction.model` selects a
 cheaper model for this task.
 
-Prefer RSS where a site offers it. `podcast sources list` shows the state of every source,
+Prefer RSS where a site offers it: `podcast sources discover https://example.com/blog` looks for the
+feed (`<link rel="alternate">` tags, then `/feed`, `/rss`, `/atom.xml`, ...) and prints a ready-to-paste
+entry. `podcast sources list` shows the state of every source,
 `podcast sources baseline` marks everything currently visible as seen.
 
 ### Episode modes
@@ -163,6 +165,7 @@ articles would be processed and to review the scripts without any speech costs, 
 | `podcast script URL...` / `podcast tts script.json` | Tune prompts and voices on single articles |
 | `podcast daemon` / `podcast health` | Built-in daily scheduler and its health check (Docker) |
 | `podcast sources list\|baseline` | Inspect sources |
+| `podcast sources discover URL` | Find the feed of a site (link tags, common paths) and print a `sources.yaml` entry; suggests CSS selectors if there is none |
 | `podcast episodes list` | List published episodes |
 | `podcast feed rebuild` | Regenerate `feed.xml`, e.g. after changing `feed.base_url` |
 
