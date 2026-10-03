@@ -69,7 +69,7 @@ def test_first_check_is_baseline_only(conn, http):
         )
     )
     report = run(conn, http, [rss()])
-    assert report.sources[0].baseline == 3
+    assert report.sources[0].baseline == 3 and report.sources[0].baselined
     assert (report.new, report.skipped, report.errors) == (0, 0, 0)
     assert set(statuses(conn).values()) == {"baseline"}  # even old and undated ones
     source = repo.get_source(conn, "Blog")
@@ -83,6 +83,8 @@ def test_next_check_with_new_item_yields_one_pending(conn, http):
     route.mock(return_value=httpx.Response(200, content=feed((A1, FRESH), (A2, FRESH))))
     report = run(conn, http, [rss()])
     assert (report.new, report.baseline, report.sources[0].known) == (1, 0, 1)
+    assert not report.sources[0].baselined
+    assert [a.url for a in report.sources[0].new_articles] == [A2]
     assert statuses(conn) == {A1: "baseline", A2: "pending"}
 
 

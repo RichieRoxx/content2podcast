@@ -66,7 +66,19 @@ def test_run_options_in_help():
 
 @pytest.mark.parametrize(
     "cmd",
-    [c for c in COMMANDS if c not in (["feed"], ["sources"], ["episodes"])],
+    [
+        c
+        for c in COMMANDS
+        if c
+        not in (
+            ["feed"],
+            ["sources"],
+            ["episodes"],
+            ["check"],
+            ["sources", "list"],
+            ["sources", "baseline"],
+        )
+    ],
     ids=" ".join,
 )
 def test_stubs_report_not_implemented(cmd):
@@ -78,7 +90,7 @@ def test_stubs_report_not_implemented(cmd):
 def test_stub_accepts_global_options(tmp_path):
     cfg = tmp_path / "c.yaml"
     cfg.write_text("podcast:\n  title: T\n")
-    result = runner.invoke(app, ["--config", str(cfg), "-vv", "check"])
+    result = runner.invoke(app, ["--config", str(cfg), "-vv", "doctor"])
     assert result.exit_code == 0
 
 
