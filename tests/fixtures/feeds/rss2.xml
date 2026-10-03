@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Example Blog</title>
+    <link>https://example.com/</link>
+    <description>A blog</description>
+    <item>
+      <title>First post</title>
+      <link>https://example.com/posts/1?utm_source=rss</link>
+      <description>&lt;p&gt;Hello &lt;b&gt;world&lt;/b&gt; &amp;amp; friends.&lt;/p&gt;&lt;script&gt;evil()&lt;/script&gt;</description>
+      <pubDate>Tue, 29 Sep 2026 06:30:00 +0200</pubDate>
+      <guid>https://example.com/posts/1</guid>
+    </item>
+    <item>
+      <title>Second post</title>
+      <link>https://example.com/posts/2</link>
+      <description>Plain summary</description>
+      <pubDate>Mon, 28 Sep 2026 12:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

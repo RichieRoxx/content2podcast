@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>No dates</title>
+    <link>https://nodate.example.com/</link>
+    <description>x</description>
+    <item><title>Undated</title><link>https://nodate.example.com/a</link></item>
+    <item><title>Bad date</title><link>https://nodate.example.com/b</link><pubDate>sometime last week</pubDate></item>
+    <item><link>https://nodate.example.com/c</link></item>
+  </channel>
+</rss>

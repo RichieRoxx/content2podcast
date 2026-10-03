@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Relative</title>
+    <link>https://rel.example.com/</link>
+    <description>x</description>
+    <item><title>Rooted</title><link>/posts/a</link></item>
+    <item><title>Relative path</title><link>posts/b</link></item>
+    <item><title>Absolute</title><link>https://other.example.net/c</link></item>
+  </channel>
+</rss>
