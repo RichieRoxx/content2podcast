@@ -189,3 +189,23 @@ def test_unknown_top_level_key_rejected(tmp_path):
     path = write(tmp_path / "config.yaml", "podcats:\n  title: x\n")
     with pytest.raises(ConfigError, match="podcats"):
         load_config(path, env_file=tmp_path / ".env")
+
+
+def test_unreadable_config_files_give_a_readable_error(tmp_path):
+    from unittest import mock
+
+    import pydantic_settings
+
+    path = write(tmp_path / "config.yaml", "podcast:\n  title: x\n")
+    denied = PermissionError(13, "Permission denied")
+    with mock.patch.object(
+        pydantic_settings.DotEnvSettingsSource, "_read_env_files", side_effect=denied
+    ):
+        with pytest.raises(ConfigError) as exc:
+            load_config(path)
+        message = str(exc.value)
+        assert "Permission denied" in message and "may read" in message
+        assert str(tmp_path / ".env") in message and str(path) in message
+        assert "Traceback" not in message
+        with pytest.raises(ConfigError, match="Permission denied.*may read"):
+            load_secrets(tmp_path / ".env")

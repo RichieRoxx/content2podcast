@@ -229,6 +229,16 @@ def _format_errors(exc: ValidationError, source: str) -> str:
     return "\n".join(lines)
 
 
+def _unreadable(exc: OSError, *files: Path | str | None) -> str:
+    """Message for a configuration file that cannot be read (typically a permission problem,
+    e.g. a ``.env`` that only root may read while the service runs as another user)."""
+    names = ", ".join(str(f) for f in files if f)
+    return (
+        f"Cannot read the configuration ({exc.strerror or exc}); check that the user running "
+        f"podcast may read: {names}"
+    )
+
+
 def _resolve_paths(cfg: AppConfig, base: Path) -> AppConfig:
     for section, name in _PATH_FIELDS:
         sub = getattr(cfg, section)
@@ -288,6 +298,8 @@ def load_config(
         raise ConfigError(_format_errors(exc, str(path) if has_file else "environment")) from None
     except yaml.YAMLError as exc:
         raise ConfigError(f"Cannot parse {path}: {exc}") from None
+    except OSError as exc:
+        raise ConfigError(_unreadable(exc, path, dotenv)) from None
     return _resolve_paths(cfg, base)
 
 
@@ -297,6 +309,8 @@ def load_secrets(env_file: Path | str | None = None) -> Secrets:
         return Secrets(_env_file=env_file)
     except ValidationError as exc:
         raise ConfigError(_format_errors(exc, "environment")) from None
+    except OSError as exc:
+        raise ConfigError(_unreadable(exc, env_file)) from None
 
 
 class SourceConfig(_Model):

@@ -34,3 +34,10 @@ jobs:
         run: |
           docker run --rm content2podcast:ci --version
           docker run --rm --entrypoint ffmpeg content2podcast:ci -version
+
+  systemd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify the systemd units
+        run: deploy/verify-units.sh
