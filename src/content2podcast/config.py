@@ -117,7 +117,9 @@ class RolesConfig(_Model):
 class AudioConfig(_Model):
     loudness_lufs: float = -16.0
     true_peak_db: float = -1.5
+    loudness_range: float = Field(11.0, gt=0)
     bitrate: str = "128k"
+    sample_rate: int = Field(44100, gt=0)
 
 
 class HttpConfig(_Model):
