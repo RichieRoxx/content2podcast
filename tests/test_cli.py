@@ -75,6 +75,7 @@ def test_run_options_in_help():
             ["sources"],
             ["episodes"],
             ["check"],
+            ["run"],
             ["script"],
             ["tts"],
             ["feed", "rebuild"],

@@ -42,5 +42,6 @@ def test_cli_run_exits_3_when_locked(tmp_path, monkeypatch):
         result = runner.invoke(app, ["--config", str(cfg), "run"])
     assert result.exit_code == 3
     assert "already in progress" in result.output
-    ok = runner.invoke(app, ["--config", str(cfg), "run"])
-    assert ok.exit_code == 0
+    # the lock is released again: the next run gets past it (and stops at the missing sources)
+    after = runner.invoke(app, ["--config", str(cfg), "run"])
+    assert after.exit_code == 2 and "Sources file not found" in after.output
