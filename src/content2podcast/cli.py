@@ -7,6 +7,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Annotated
 
@@ -17,16 +18,30 @@ from content2podcast import repository as repo
 from content2podcast.config import (
     AppConfig,
     ConfigError,
+    Secrets,
     SourceConfig,
     SourcesConfig,
     load_config,
+    load_secrets,
     load_sources,
+    resolve_config_path,
 )
 from content2podcast.db import connect, db_path
-from content2podcast.http import make_client
+from content2podcast.http import HttpError, make_client
 from content2podcast.lock import RunLocked, run_lock
 from content2podcast.logging_setup import setup_logging
+from content2podcast.providers.llm.base import LLMError, LLMProvider
+from content2podcast.providers.registry import ProviderNotConfiguredError, build_llm, build_tts
+from content2podcast.providers.tts.base import NEUTRAL, allowed_styles
+from content2podcast.script.adhoc import fetch_article
+from content2podcast.script.dryrun import dry_run as run_dry_run
+from content2podcast.script.dryrun import dry_run_root
+from content2podcast.script.generator import ScriptArticle, generate_script
+from content2podcast.script.models import ScriptError
+from content2podcast.script.output import slugify, unique_dir, write_script_files
+from content2podcast.script.prompt import PromptError
 from content2podcast.sources.discovery import DiscoveryReport, SourceReport, discover
+from content2podcast.sources.models import SourceError
 
 EXIT_OK = 0
 EXIT_RUNTIME_ERROR = 1
@@ -49,12 +64,20 @@ class AppContext:
 
     config_path: Path | None = None
     _config: AppConfig | None = field(default=None, repr=False)
+    _secrets: Secrets | None = field(default=None, repr=False)
 
     @property
     def config(self) -> AppConfig:
         if self._config is None:
             self._config = load_config(self.config_path)
         return self._config
+
+    @property
+    def secrets(self) -> Secrets:
+        """Credentials from the environment and the ``.env`` next to the config file."""
+        if self._secrets is None:
+            self._secrets = load_secrets(resolve_config_path(self.config_path).parent / ".env")
+        return self._secrets
 
 
 def _fail(message: str, code: int) -> typer.Exit:
@@ -156,6 +179,27 @@ def _checked_sources(workspace: Workspace, name: str | None) -> list[SourceConfi
     return sources
 
 
+def _llm_and_styles(ctx: typer.Context, config: AppConfig) -> tuple[LLMProvider, list[str]]:
+    """The configured LLM and the speaking styles the TTS provider supports for both voices."""
+    try:
+        secrets = ctx.obj.secrets
+        llm = build_llm(config.llm, secrets)
+        if config.tts is None:
+            typer.echo(
+                "Note: no tts provider configured; scripts will only use the 'neutral' style.",
+                err=True,
+            )
+            return llm, [NEUTRAL]
+        tts = build_tts(config.tts, secrets)
+    except (ProviderNotConfiguredError, ConfigError) as exc:
+        raise _fail(str(exc), EXIT_CONFIG_ERROR) from None
+    return llm, allowed_styles(tts, config.roles.host.voice, config.roles.expert.voice)
+
+
+def _speaker_names(config: AppConfig) -> dict[str, str]:
+    return {"host": config.roles.host.name, "expert": config.roles.expert.name}
+
+
 def _version_callback(value: bool) -> None:
     if value:
         typer.echo(f"content2podcast {__version__}")
@@ -208,11 +252,50 @@ def check(ctx: typer.Context, source: SourceOption = None) -> None:
     _exit_if_all_failed(report)
 
 
+def _dry_run(ctx: typer.Context) -> None:
+    with _workspace(ctx) as workspace:
+        config = workspace.config
+        llm, styles = _llm_and_styles(ctx, config)
+        enabled = [s for s in workspace.sources.sources if s.enabled]
+        report = _run_discovery(workspace, enabled)
+        for source_report in report.sources:
+            _print_check_line(source_report)
+        _print_summary(report)
+        today = date.today()
+        try:
+            with make_client(config.http) as http:
+                items = run_dry_run(workspace.conn, http, config, llm, styles, today=today)
+        except PromptError as exc:
+            raise _fail(str(exc), EXIT_CONFIG_ERROR) from None
+    if not items:
+        typer.echo("Dry run: no pending articles.")
+        return
+    written = [i for i in items if i.script is not None]
+    typer.echo(
+        f"Dry run: {len(written)} of {len(items)} script(s) written to "
+        f"{dry_run_root(config, today)}"
+    )
+    for item in items:
+        if item.script is not None:
+            minutes = item.script.estimated_minutes(config.episode.words_per_minute)
+            typer.echo(f"  - {item.title} ({item.script.word_count} words, ~{minutes:.1f} min)")
+            typer.echo(f"    {item.directory}")
+        else:
+            typer.echo(f"  - FAILED {item.title}: {item.error}")
+    if not written:
+        raise typer.Exit(EXIT_RUNTIME_ERROR)
+
+
 @app.command()
 def run(
     ctx: typer.Context,
     dry_run: Annotated[
-        bool, typer.Option("--dry-run", help="Do everything except publish.")
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Discover, extract and write scripts to data_dir/dry-run/; no TTS, no feed, "
+            "articles stay pending.",
+        ),
     ] = False,
     force: Annotated[
         bool, typer.Option("--force", help="Reprocess already seen articles.")
@@ -222,15 +305,70 @@ def run(
     config = _load(ctx)
     try:
         with run_lock(config.paths.data_dir):
-            typer.echo("run: not implemented yet")
+            if dry_run:
+                _dry_run(ctx)
+            else:
+                typer.echo("run: not implemented yet")
     except RunLocked as exc:
         raise _fail(f"Cannot start: {exc}", RunLocked.exit_code) from None
 
 
+MODES = ("per_article", "daily_digest")
+
+
 @app.command()
-def script(ctx: typer.Context) -> None:
-    """Generate dialogue scripts only."""
-    _stub(ctx, "script")
+def script(
+    ctx: typer.Context,
+    urls: Annotated[list[str], typer.Argument(help="Article URLs.")],
+    mode: Annotated[
+        str | None,
+        typer.Option(
+            "--mode", help="per_article (one script per URL) or daily_digest (one script)."
+        ),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option("-o", "--output", help="Output directory (default: data_dir/adhoc/<date>)."),
+    ] = None,
+) -> None:
+    """Write scripts for article URLs without touching the database (for prompt tuning)."""
+    config = _load(ctx)
+    mode = mode or config.episode.mode
+    if mode not in MODES:
+        raise _fail(f"Unknown mode {mode!r}. Use one of: {', '.join(MODES)}", EXIT_CONFIG_ERROR)
+    llm, styles = _llm_and_styles(ctx, config)
+    today = date.today()
+    base = output or config.paths.data_dir / "adhoc" / today.isoformat()
+
+    articles: list[ScriptArticle] = []
+    failures = 0
+    with make_client(config.http) as http:
+        for url in urls:
+            try:
+                articles.append(fetch_article(http, url))
+            except (HttpError, SourceError) as exc:
+                failures += 1
+                typer.echo(f"FAILED {url}: {exc}", err=True)
+
+    groups = [[a] for a in articles] if mode == "per_article" else ([articles] if articles else [])
+    written = 0
+    for group in groups:
+        try:
+            result = generate_script(llm, group, config, styles, today=today, mode=mode)
+        except PromptError as exc:
+            raise _fail(str(exc), EXIT_CONFIG_ERROR) from None
+        except (LLMError, ScriptError) as exc:
+            failures += 1
+            typer.echo(f"FAILED {group[0].url}: {exc}", err=True)
+            continue
+        directory = unique_dir(base, slugify(result.title), str(written + 1))
+        write_script_files(result, directory, _speaker_names(config))
+        minutes = result.estimated_minutes(config.episode.words_per_minute)
+        typer.echo(f"{result.title} ({result.word_count} words, ~{minutes:.1f} min)")
+        typer.echo(f"  {directory}")
+        written += 1
+    if not written:
+        raise typer.Exit(EXIT_RUNTIME_ERROR)
 
 
 @app.command()
