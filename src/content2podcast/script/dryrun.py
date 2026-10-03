@@ -16,7 +16,8 @@ from content2podcast.extract import ensure_content
 from content2podcast.providers.llm.base import LLMError, LLMProvider
 from content2podcast.script.generator import ScriptArticle, generate_script
 from content2podcast.script.models import PodcastScript, ScriptError
-from content2podcast.script.output import slugify, unique_dir, write_script_files
+from content2podcast.script.output import unique_dir, write_script_files
+from content2podcast.slug import slugify
 
 log = logging.getLogger(__name__)
 

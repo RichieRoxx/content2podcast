@@ -39,8 +39,9 @@ from content2podcast.script.dryrun import dry_run as run_dry_run
 from content2podcast.script.dryrun import dry_run_root
 from content2podcast.script.generator import ScriptArticle, generate_script
 from content2podcast.script.models import ScriptError, load_script
-from content2podcast.script.output import slugify, unique_dir, write_script_files
+from content2podcast.script.output import unique_dir, write_script_files
 from content2podcast.script.prompt import PromptError
+from content2podcast.slug import slugify
 from content2podcast.sources.discovery import DiscoveryReport, SourceReport, discover
 from content2podcast.sources.models import SourceError
 from content2podcast.speech import group_by_segment, plan_script, synthesize_script
