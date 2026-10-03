@@ -9,14 +9,16 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import yaml
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PlainValidator,
     SecretStr,
+    SerializeAsAny,
     ValidationError,
     field_validator,
     model_validator,
@@ -27,6 +29,8 @@ from pydantic_settings import (
     SettingsConfigDict,
     YamlConfigSettingsSource,
 )
+
+from content2podcast.providers.registry import ProviderOptions, llm_registry, tts_registry
 
 CONFIG_ENV_VAR = "C2P_CONFIG"
 DEFAULT_CONFIG_FILE = "config.yaml"
@@ -127,14 +131,6 @@ class ScheduleConfig(_Model):
         return v
 
 
-class ProviderConfig(BaseModel):
-    """Placeholder; becomes a provider discriminated union in the provider-architecture issue."""
-
-    model_config = ConfigDict(extra="allow")
-
-    provider: str = "azure"
-
-
 # Fields holding filesystem paths that are resolved against the config directory.
 _PATH_FIELDS: tuple[tuple[str, str], ...] = (
     ("paths", "data_dir"),
@@ -164,8 +160,14 @@ class AppConfig(BaseSettings):
     audio: AudioConfig = AudioConfig()
     http: HttpConfig = HttpConfig()
     schedule: ScheduleConfig = ScheduleConfig()
-    llm: ProviderConfig = ProviderConfig()
-    tts: ProviderConfig = ProviderConfig()
+    # Discriminated on ``provider``: validated against the options model of the registered
+    # provider, see content2podcast.providers. None = not configured.
+    llm: Annotated[SerializeAsAny[ProviderOptions] | None, PlainValidator(llm_registry.parse)] = (
+        None
+    )
+    tts: Annotated[SerializeAsAny[ProviderOptions] | None, PlainValidator(tts_registry.parse)] = (
+        None
+    )
 
     @classmethod
     def settings_customise_sources(
