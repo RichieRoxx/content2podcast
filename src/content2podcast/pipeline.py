@@ -4,6 +4,7 @@ retention. Every article is processed in isolation: one failing article never st
 from __future__ import annotations
 
 import logging
+import shutil
 import sqlite3
 import time
 import uuid
@@ -24,6 +25,7 @@ from content2podcast.providers.llm.base import LLMProvider
 from content2podcast.providers.tts.base import TTSOptions, TTSProvider
 from content2podcast.retention import apply_retention
 from content2podcast.script.generator import ScriptArticle, generate_script
+from content2podcast.script.models import PodcastScript
 from content2podcast.script.prompt import PromptError
 from content2podcast.sources.discovery import DiscoveryReport, discover
 from content2podcast.speech import group_by_segment, plan_script, synthesize_script
@@ -118,9 +120,28 @@ class Pipeline:
             log.debug("Traceback for article %s", row["id"], exc_info=True)
         return result
 
-    def _build_and_publish(self, row: sqlite3.Row, title: str, text: str) -> tuple[str, str]:
+    def _draft(
+        self, row: sqlite3.Row, title: str, text: str, today: date
+    ) -> tuple[int, str, str, PodcastScript]:
+        """The episode draft for this article: an existing one is resumed (script reused, no LLM
+        call); otherwise the script is generated and the draft is stored *before* any TTS cost.
+        Returns ``(episode id, guid, planned relative MP3 path, script)``."""
+        existing = repo.find_draft_for_article(self.conn, row["id"])
+        if existing is not None and existing["script_json"] and existing["audio_file"]:
+            try:
+                script = PodcastScript.model_validate_json(existing["script_json"])
+            except ValueError:
+                log.warning(
+                    "Discarding draft with unreadable script: %s", kv(guid=existing["guid"])
+                )
+                self._discard_draft(existing)
+            else:
+                log.info("Resuming draft episode: %s", kv(guid=existing["guid"], id=row["id"]))
+                return existing["id"], existing["guid"], existing["audio_file"], script
+        elif existing is not None:
+            self._discard_draft(existing)
+
         config = self.config
-        today: date = self.now().date()
         article = ScriptArticle(
             url=row["url"],
             title=title,
@@ -129,8 +150,31 @@ class Pipeline:
             published=row["published_at"],
         )
         script = generate_script(self.llm, [article], config, self.styles, today=today)
-
         guid = self.new_guid()
+        relpath = episode_relpath(today, script.title, guid)  # fixed now: a resume reuses it
+        episode_id = repo.create_episode(
+            self.conn,
+            guid=guid,
+            mode="per_article",
+            title=script.title,
+            summary=script.summary,
+            script=script.model_dump(),
+            audio_file=relpath,
+            articles=[(row["id"], "discussed")],
+        )
+        return episode_id, guid, relpath, script
+
+    def _discard_draft(self, draft: sqlite3.Row) -> None:
+        repo.delete_episode(self.conn, draft["id"])
+        shutil.rmtree(
+            episode_work_dir(self.config.paths.data_dir, draft["guid"]), ignore_errors=True
+        )
+
+    def _build_and_publish(self, row: sqlite3.Row, title: str, text: str) -> tuple[str, str]:
+        config = self.config
+        now = self.now()
+        episode_id, guid, relpath, script = self._draft(row, title, text, now.date())
+
         work_dir = episode_work_dir(config.paths.data_dir, guid)
         options = (
             config.tts if isinstance(config.tts, TTSOptions) else TTSOptions(provider=self.tts.name)
@@ -148,31 +192,32 @@ class Pipeline:
                 title=script.title,
                 artist=config.podcast.author,
                 album=config.podcast.title,
-                date=today.isoformat(),
+                date=now.date().isoformat(),
                 comment=script.summary,
             ),
             intro=config.episode.intro_file,
             outro=config.episode.outro_file,
         )
 
-        relpath = episode_relpath(today, script.title, guid)
         place_episode(mp3, config.paths.output_dir, relpath)
-        repo.record_published_episode(
+        number = repo.publish_draft_episode(
             self.conn,
-            guid=guid,
-            mode="per_article",
-            title=script.title,
-            summary=script.summary,
-            script=script.model_dump(),
+            episode_id,
             audio_file=relpath,
             audio_bytes=assembled.size_bytes,
             duration_s=assembled.duration_s,
-            articles=[(row["id"], "discussed")],
+            # same transaction: if the feed cannot be written, nothing is published
+            before_commit=lambda: write_feed(config, self.conn, now=now),
         )
-        write_feed(config, self.conn, now=self.now())
+        shutil.rmtree(work_dir, ignore_errors=True)
         log.info(
             "Episode published: %s",
-            kv(guid=guid, title=script.title, duration=f"{assembled.duration_s:.0f}s"),
+            kv(
+                guid=guid,
+                number=number,
+                title=script.title,
+                duration=f"{assembled.duration_s:.0f}s",
+            ),
         )
         return guid, script.title
 
@@ -189,6 +234,9 @@ class Pipeline:
         if force:
             requeued = repo.requeue_articles(self.conn)
             log.info("Requeued failed and skipped articles: %s", kv(count=requeued))
+        for draft in repo.stale_drafts(self.conn):
+            log.info("Discarding stale draft episode: %s", kv(guid=draft["guid"]))
+            self._discard_draft(draft)
         discovery = discover(
             self.conn,
             [s for s in sources if s.enabled],

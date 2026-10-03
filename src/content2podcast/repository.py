@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
 from content2podcast.db import utcnow
@@ -232,14 +232,15 @@ def create_episode(
     summary: str | None = None,
     script: Any = None,
     number: int | None = None,
+    audio_file: str | None = None,
     articles: Iterable[tuple[int, str]] = (),
 ) -> int:
     """Create a ``draft`` episode, linking ``(article_id, role)`` pairs. ``script`` is stored as
-    JSON. Returns the episode id."""
+    JSON; ``audio_file`` is the planned relative path of the MP3. Returns the episode id."""
     with conn:
         cur = conn.execute(
             "INSERT INTO episodes (guid, mode, number, title, summary, script_json, status, "
-            "created_at) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?)",
+            "audio_file, created_at) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?)",
             (
                 guid,
                 mode,
@@ -247,6 +248,7 @@ def create_episode(
                 title,
                 summary,
                 None if script is None else json.dumps(script, ensure_ascii=False),
+                audio_file,
                 utcnow(),
             ),
         )
@@ -258,53 +260,60 @@ def create_episode(
     return episode_id
 
 
-def record_published_episode(
+def find_draft_for_article(conn: sqlite3.Connection, article_id: int) -> sqlite3.Row | None:
+    """The newest draft episode that discusses ``article_id``."""
+    return conn.execute(
+        "SELECT e.* FROM episodes e JOIN episode_articles ea ON ea.episode_id = e.id "
+        "WHERE e.status = 'draft' AND ea.article_id = ? AND ea.role = 'discussed' "
+        "ORDER BY e.id DESC LIMIT 1",
+        (article_id,),
+    ).fetchone()
+
+
+def stale_drafts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Drafts that can no longer be continued: no discussed article, or one of them is not
+    ``pending`` any more."""
+    return conn.execute(
+        "SELECT e.* FROM episodes e WHERE e.status = 'draft' AND ("
+        " NOT EXISTS (SELECT 1 FROM episode_articles ea WHERE ea.episode_id = e.id"
+        "             AND ea.role = 'discussed')"
+        " OR EXISTS (SELECT 1 FROM episode_articles ea JOIN articles a ON a.id = ea.article_id"
+        "            WHERE ea.episode_id = e.id AND ea.role = 'discussed'"
+        "            AND a.status != 'pending')"
+        ") ORDER BY e.id"
+    ).fetchall()
+
+
+def publish_draft_episode(
     conn: sqlite3.Connection,
+    episode_id: int,
     *,
-    guid: str,
-    mode: str,
-    title: str,
-    summary: str | None,
-    script: Any,
     audio_file: str,
     audio_bytes: int,
     duration_s: float,
-    articles: Iterable[tuple[int, str]],
+    before_commit: Callable[[], None] | None = None,
 ) -> int:
-    """Create a ``published`` episode with the next number, link its articles and mark the
-    ``discussed`` ones ``processed`` -- all in one transaction. Returns the episode id."""
-    articles = list(articles)
-    now = utcnow()
+    """Publish a draft in **one** transaction: the episode becomes ``published`` with the next
+    number, its ``discussed`` articles become ``processed``, then ``before_commit`` runs (it
+    sees the new state through the same connection, e.g. to write the feed). If it raises, the
+    whole transaction is rolled back. Returns the episode number."""
     with conn:
         number = conn.execute("SELECT COALESCE(MAX(number), 0) + 1 FROM episodes").fetchone()[0]
         cur = conn.execute(
-            "INSERT INTO episodes (guid, mode, number, title, summary, script_json, status, "
-            "audio_file, audio_bytes, duration_s, created_at, published_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, 'published', ?, ?, ?, ?, ?)",
-            (
-                guid,
-                mode,
-                number,
-                title,
-                summary,
-                None if script is None else json.dumps(script, ensure_ascii=False),
-                audio_file,
-                audio_bytes,
-                duration_s,
-                now,
-                now,
-            ),
+            "UPDATE episodes SET status = 'published', number = ?, audio_file = ?, "
+            "audio_bytes = ?, duration_s = ?, published_at = ? WHERE id = ? AND status = 'draft'",
+            (number, audio_file, audio_bytes, duration_s, utcnow(), episode_id),
         )
-        episode_id = cur.lastrowid
-        conn.executemany(
-            "INSERT INTO episode_articles (episode_id, article_id, role) VALUES (?, ?, ?)",
-            [(episode_id, article_id, role) for article_id, role in articles],
+        if cur.rowcount != 1:
+            raise ValueError(f"Episode {episode_id} is not a draft")
+        conn.execute(
+            "UPDATE articles SET status = 'processed', last_error = NULL WHERE id IN ("
+            "SELECT article_id FROM episode_articles WHERE episode_id = ? AND role = 'discussed')",
+            (episode_id,),
         )
-        conn.executemany(
-            "UPDATE articles SET status = 'processed', last_error = NULL WHERE id = ?",
-            [(article_id,) for article_id, role in articles if role == "discussed"],
-        )
-    return episode_id
+        if before_commit is not None:
+            before_commit()
+    return number
 
 
 def get_episode(conn: sqlite3.Connection, episode_id: int) -> sqlite3.Row | None:
