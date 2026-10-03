@@ -141,11 +141,28 @@ def list_articles(conn: sqlite3.Connection, status: str | None = None) -> list[s
 
 
 def set_article_content(conn: sqlite3.Connection, article_id: int, content: str) -> None:
+    """Store the article text; a successful extraction clears an earlier error."""
     with conn:
         conn.execute(
-            "UPDATE articles SET content = ?, extracted_at = ? WHERE id = ?",
+            "UPDATE articles SET content = ?, extracted_at = ?, last_error = NULL WHERE id = ?",
             (content, utcnow(), article_id),
         )
+
+
+def record_extraction_failure(
+    conn: sqlite3.Connection, article_id: int, error: str, *, max_attempts: int
+) -> str:
+    """Count a failed attempt and store the error. Once ``attempts`` reaches ``max_attempts``
+    the article becomes ``failed``. Returns the resulting status."""
+    with conn:
+        conn.execute(
+            "UPDATE articles SET attempts = attempts + 1, last_error = ?, "
+            "status = CASE WHEN attempts + 1 >= ? THEN 'failed' ELSE status END WHERE id = ?",
+            (error, max_attempts, article_id),
+        )
+    return conn.execute("SELECT status FROM articles WHERE id = ?", (article_id,)).fetchone()[
+        "status"
+    ]
 
 
 def set_article_status(

@@ -81,6 +81,7 @@ class EpisodeConfig(_Model):
     max_articles: int = Field(10, gt=0)
     max_article_age_days: int = Field(7, gt=0)
     max_chars_per_article: int = Field(8000, gt=0)
+    min_chars_per_article: int = Field(300, gt=0)  # shorter extractions fall back to the summary
     max_episodes_per_run: int | None = Field(None, gt=0)
     gap_ms: int = Field(300, ge=0)
     intro_file: Path | None = None

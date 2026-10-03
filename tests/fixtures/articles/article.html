@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>Warum Python-Pakete schneller installieren | Beispiel-Blog</title>
+  <meta name="author" content="Erika Muster">
+</head>
+<body>
+  <header>
+    <nav><ul><li><a href="/">Start</a></li><li><a href="/archiv">Archiv</a></li><li><a href="/impressum">Impressum</a></li></ul></nav>
+  </header>
+  <main>
+    <article>
+      <h1>Warum Python-Pakete heute schneller installieren</h1>
+      <p class="byline">Von Erika Muster, 29. September 2026</p>
+      <p>Wer vor ein paar Jahren ein größeres Python-Projekt aufgesetzt hat, kennt das Warten: Der Paketmanager löste Abhängigkeiten auf, lud Archive herunter und baute bei Bedarf Pakete aus dem Quelltext. Das dauerte bei großen Projekten oft mehrere Minuten, und in kontinuierlichen Integrationsläufen summierte sich diese Zeit zu einem echten Kostenfaktor.</p>
+      <p>Inzwischen hat sich einiges geändert. Neue Werkzeuge sind in Rust geschrieben, nutzen parallele Downloads und halten einen globalen Cache vor, aus dem Pakete per Hardlink in die virtuelle Umgebung eingebunden werden. Dadurch entfällt das Kopieren und Entpacken, das früher den größten Teil der Zeit verschlang.</p>
+      <p>Hinzu kommt eine strengere Auflösung der Abhängigkeiten. Eine Lock-Datei hält die exakten Versionen fest, sodass ein Lauf auf dem Server dieselben Pakete installiert wie auf dem Rechner der Entwicklerin. Wer die Lock-Datei einchecken lässt, spart sich außerdem die erneute Auflösung bei jedem Build.</p>
+      <p>Für Teams bedeutet das vor allem verlässlichere Abläufe. Fehler durch zufällig neu erschienene Versionen werden seltener, und die Rückmeldung aus der Testumgebung kommt deutlich früher. Am Ende zählt, dass Entwicklerinnen weniger warten und mehr Zeit für die eigentliche Arbeit haben.</p>
+    </article>
+    <aside><h3>Mehr aus dem Blog</h3><ul><li><a href="/a">Ein anderer Beitrag</a></li></ul></aside>
+    <section id="comments"><h3>Kommentare</h3><p>Anna: Danke für den Artikel, sehr hilfreich gewesen!</p></section>
+  </main>
+  <footer><p>Cookie-Einstellungen · Datenschutz · Impressum · © 2026 Beispiel-Blog</p></footer>
+</body>
+</html>
