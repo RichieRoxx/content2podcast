@@ -45,6 +45,14 @@ def extract_text(html: bytes | str, url: str | None = None) -> str | None:
     return text.strip() if text and text.strip() else None
 
 
+def extract_metadata(html: bytes | str, url: str | None = None) -> tuple[str | None, str | None]:
+    """``(title, date)`` of an article page; ``date`` is ``YYYY-MM-DD`` when the page has one."""
+    meta = trafilatura.extract_metadata(html, default_url=url)
+    if meta is None:
+        return None, None
+    return (meta.title or None), (meta.date or None)
+
+
 def _choose(
     extracted: str | None, summary: str | None, min_chars: int
 ) -> tuple[str, Origin] | None:

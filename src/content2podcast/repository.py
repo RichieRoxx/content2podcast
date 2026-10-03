@@ -140,6 +140,17 @@ def list_articles(conn: sqlite3.Connection, status: str | None = None) -> list[s
     return conn.execute("SELECT * FROM articles WHERE status = ? ORDER BY id", (status,)).fetchall()
 
 
+def list_pending_articles(conn: sqlite3.Connection, limit: int | None = None) -> list[sqlite3.Row]:
+    """Pending articles (oldest first) with their source name as ``source_name``."""
+    sql = (
+        "SELECT a.*, s.name AS source_name FROM articles a "
+        "JOIN sources s ON s.id = a.source_id WHERE a.status = 'pending' ORDER BY a.id"
+    )
+    if limit is not None:
+        return conn.execute(sql + " LIMIT ?", (limit,)).fetchall()
+    return conn.execute(sql).fetchall()
+
+
 def set_article_content(conn: sqlite3.Connection, article_id: int, content: str) -> None:
     """Store the article text; a successful extraction clears an earlier error."""
     with conn:
