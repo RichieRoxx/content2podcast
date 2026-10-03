@@ -61,8 +61,9 @@ http:
 schedule:
   time: "05:30"            # HH:MM, local time
 
-# Placeholders; become provider-specific sections in a later milestone step.
-llm:
-  provider: azure
-tts:
-  provider: azure
+# Providers, selected by "provider". Optional until the pipeline needs them.
+# Available now: "fake" (deterministic, for tests and dry runs). Azure providers follow.
+# llm:
+#   provider: fake
+# tts:
+#   provider: fake
