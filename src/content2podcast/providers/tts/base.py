@@ -5,11 +5,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from pydantic import Field
+
+from content2podcast.providers.registry import ProviderOptions
+
 NEUTRAL = "neutral"
 
 
 class TTSError(Exception):
     """The TTS call failed."""
+
+
+class TTSOptions(ProviderOptions):
+    """Options every TTS provider shares (used by the provider-agnostic synthesis)."""
+
+    concurrency: int = Field(3, ge=1)  # parallel requests
+    max_chars_per_episode: int = Field(30000, gt=0)  # cost guard, checked before any request
 
 
 @dataclass(frozen=True)
