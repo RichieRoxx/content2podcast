@@ -31,6 +31,11 @@ def clean_env(tmp_path, monkeypatch, request):
     for key in list(os.environ):
         if key.startswith("C2P_"):
             monkeypatch.delenv(key)
+    # CI sets color variables; Rich would then split option names with ANSI codes
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setenv("TERM", "dumb")
+    monkeypatch.setenv("COLUMNS", "200")
     monkeypatch.chdir(tmp_path)
 
 
