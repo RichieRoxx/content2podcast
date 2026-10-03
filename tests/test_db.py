@@ -175,3 +175,42 @@ def test_duplicate_episode_guid_rejected(conn):
     repo.create_episode(conn, guid="g", mode="per_article", title="T")
     with pytest.raises(sqlite3.IntegrityError):
         repo.create_episode(conn, guid="g", mode="per_article", title="T2")
+
+
+def test_failing_migration_is_rolled_back(tmp_path, monkeypatch):
+    from content2podcast import db
+
+    good = "CREATE TABLE a (x INTEGER);"
+    bad = "CREATE TABLE b (x INTEGER); INSERT INTO nope VALUES (1);"
+    monkeypatch.setattr(db, "_load_migrations", lambda: [(1, good), (2, bad)])
+    c = sqlite3.connect(tmp_path / "m.db")
+    with pytest.raises(sqlite3.Error):
+        migrate(c)
+    assert schema_version(c) == 1  # the first migration stayed, the second left nothing behind
+    tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert tables == {"a"}
+
+
+def test_migration_files_must_not_have_gaps(monkeypatch):
+    from importlib import resources
+
+    from content2podcast import db
+
+    class Entry:
+        def __init__(self, name):
+            self.name = name
+
+        def read_text(self, encoding):
+            return ""
+
+    class Dir:
+        def iterdir(self):
+            return [Entry("0001_a.sql"), Entry("0003_c.sql"), Entry("notes.txt")]
+
+    class Pkg:
+        def joinpath(self, name):
+            return Dir()
+
+    monkeypatch.setattr(resources, "files", lambda package: Pkg())
+    with pytest.raises(RuntimeError, match="without gaps"):
+        db._load_migrations()
