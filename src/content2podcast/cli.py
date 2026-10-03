@@ -19,6 +19,7 @@ from content2podcast.audio import AudioError, EpisodeMetadata, assemble_episode,
 from content2podcast.config import (
     AppConfig,
     ConfigError,
+    HttpConfig,
     Secrets,
     SourceConfig,
     SourcesConfig,
@@ -60,6 +61,7 @@ from content2podcast.script.models import ScriptError, load_script
 from content2podcast.script.output import unique_dir, write_script_files
 from content2podcast.script.prompt import PromptError
 from content2podcast.slug import slugify
+from content2podcast.sources.autodiscover import discover_feeds, snippet
 from content2podcast.sources.discovery import DiscoveryReport, SourceReport, discover
 from content2podcast.sources.llm_links import LinkSelector
 from content2podcast.sources.models import SourceError
@@ -617,6 +619,44 @@ def sources_list(ctx: typer.Context) -> None:
         typer.echo(line)
     for error in errors:
         typer.echo(f"last error - {error}")
+
+
+@sources_app.command("discover")
+def sources_discover(
+    ctx: typer.Context,
+    url: Annotated[str, typer.Argument(help="Home page or blog page of the site.")],
+) -> None:
+    """Find the RSS/Atom feed of a site and print a ready-to-paste sources.yaml entry.
+
+    Looks at <link rel="alternate"> tags and common feed paths (/feed, /rss, /atom.xml, ...).
+    Without a feed, CSS selectors for the article links are suggested for an html source.
+    Read-only; works without a database (and without a config file).
+    """
+    try:
+        http_config = ctx.obj.config.http
+    except ConfigError:
+        http_config = HttpConfig()
+    try:
+        with make_client(http_config) as http:
+            result = discover_feeds(http, url)
+    except SourceError as exc:
+        raise _fail(str(exc), EXIT_RUNTIME_ERROR) from None
+    if result.feeds:
+        typer.echo(f"Feeds found for {result.page_url}:")
+        for feed in result.feeds:
+            title = f" - {feed.title}" if feed.title else ""
+            typer.echo(f"  {feed.url} ({feed.articles} entries, via {feed.via}){title}")
+    elif result.selectors:
+        typer.echo(f"No feed found for {result.page_url}. Suggested selectors for an html source:")
+        for suggestion in result.selectors:
+            typer.echo(f"  {suggestion.selector!r}: {suggestion.links} links, e.g.")
+            for example in suggestion.examples:
+                typer.echo(f"      {example}")
+    else:
+        typer.echo(f"No feed and no article links found for {result.page_url}.")
+        raise typer.Exit(EXIT_RUNTIME_ERROR)
+    typer.echo("\nAdd to sources.yaml:\n")
+    typer.echo((snippet(result) or "").rstrip("\n"))
 
 
 @sources_app.command("baseline")
