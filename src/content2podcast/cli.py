@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -33,7 +33,7 @@ from content2podcast.feed import load_feed_episodes, write_feed
 from content2podcast.http import HttpError, make_client
 from content2podcast.lock import RunLocked, run_lock
 from content2podcast.logging_setup import setup_logging
-from content2podcast.pipeline import Pipeline
+from content2podcast.pipeline import Pipeline, RunSummary
 from content2podcast.providers.llm.base import LLMError, LLMProvider
 from content2podcast.providers.registry import ProviderNotConfiguredError, build_llm, build_tts
 from content2podcast.providers.tts.base import (
@@ -42,6 +42,15 @@ from content2podcast.providers.tts.base import (
     TTSOptions,
     TTSProvider,
     allowed_styles,
+)
+from content2podcast.scheduler import (
+    STATUS_FILENAME,
+    DaemonStatus,
+    JobResult,
+    Scheduler,
+    check_health,
+    install_signal_handlers,
+    parse_schedule_time,
 )
 from content2podcast.script.adhoc import fetch_article
 from content2podcast.script.dryrun import dry_run as run_dry_run
@@ -320,7 +329,11 @@ def _dry_run(ctx: typer.Context) -> None:
         raise typer.Exit(EXIT_RUNTIME_ERROR)
 
 
-def _full_run(ctx: typer.Context, force: bool) -> None:
+def _execute_run(
+    ctx: typer.Context, force: bool, should_stop: Callable[[], bool] = lambda: False
+) -> RunSummary:
+    """One complete pipeline run (without the run lock). Setup problems end the command with
+    an error message and an exit code (``typer.Exit``)."""
     with _workspace(ctx) as workspace:
         config = workspace.config
         llm, tts, styles = _providers(ctx, config, need_tts=True)
@@ -329,11 +342,16 @@ def _full_run(ctx: typer.Context, force: bool) -> None:
         except AudioError as exc:
             raise _fail(str(exc), EXIT_RUNTIME_ERROR) from None
         with make_client(config.http) as http:
-            pipeline = Pipeline(config, workspace.conn, http, llm, tts, styles)
+            pipeline = Pipeline(
+                config, workspace.conn, http, llm, tts, styles, should_stop=should_stop
+            )
             try:
-                summary = pipeline.run(workspace.sources.sources, force=force)
+                return pipeline.run(workspace.sources.sources, force=force)
             except PromptError as exc:
                 raise _fail(str(exc), EXIT_CONFIG_ERROR) from None
+
+
+def _print_run(summary: RunSummary) -> None:
     for source_report in summary.discovery.sources:
         _print_check_line(source_report)
     for note in summary.notes:
@@ -348,6 +366,11 @@ def _full_run(ctx: typer.Context, force: bool) -> None:
         f"{summary.pruned} pruned, {summary.discovery.errors} source error(s), "
         f"{summary.duration_s:.0f} s"
     )
+
+
+def _full_run(ctx: typer.Context, force: bool) -> None:
+    summary = _execute_run(ctx, force)
+    _print_run(summary)
     if summary.exit_code:
         raise typer.Exit(summary.exit_code)
 
@@ -686,11 +709,53 @@ def doctor(
 
 @app.command()
 def daemon(ctx: typer.Context) -> None:
-    """Run on the configured schedule."""
-    _stub(ctx, "daemon")
+    """Run the pipeline every day at schedule.time (local time zone, set TZ in containers).
+
+    Catches up on start if the last successful run is older than the last scheduled time.
+    SIGTERM / SIGINT stop it after the current episode. Writes status.json to the data
+    directory for `podcast health`. A failing run does not stop the daemon.
+    """
+    config = _load(ctx)
+    try:
+        at = parse_schedule_time(config.schedule.time)
+    except ValueError as exc:
+        raise _fail(str(exc), EXIT_CONFIG_ERROR) from None
+    scheduler: Scheduler
+
+    def job() -> JobResult:
+        try:
+            with run_lock(config.paths.data_dir):
+                summary = _execute_run(ctx, False, lambda: scheduler.stopping)
+        except RunLocked as exc:
+            return JobResult("locked", str(exc))
+        except typer.Exit as exc:  # the message was already printed
+            return JobResult("failed", f"setup failed (exit code {exc.exit_code})")
+        _print_run(summary)
+        if summary.exit_code:
+            return JobResult("failed", f"{len(summary.failed)} episode(s) failed, none published")
+        return JobResult("ok")
+
+    scheduler = Scheduler(config.paths.data_dir / STATUS_FILENAME, at, job)
+    restore = install_signal_handlers(scheduler)
+    typer.echo(f"Daemon started: daily at {config.schedule.time} ({scheduler.tz})")
+    try:
+        scheduler.serve()
+    finally:
+        restore()
+    typer.echo("Daemon stopped")
 
 
 @app.command()
 def health(ctx: typer.Context) -> None:
-    """Exit 0 if the last run was healthy (for container health checks)."""
-    _stub(ctx, "health")
+    """Exit 0 if the daemon is alive and its last run is recent and did not fail (for container
+    health checks); exit 1 otherwise."""
+    config = _load(ctx)
+    try:
+        status = DaemonStatus.from_file(config.paths.data_dir / STATUS_FILENAME)
+    except ValueError as exc:
+        typer.echo(f"unhealthy: {exc}")
+        raise typer.Exit(EXIT_RUNTIME_ERROR) from None
+    healthy, message = check_health(status, datetime.now(UTC))
+    typer.echo(f"{'healthy' if healthy else 'unhealthy'}: {message}")
+    if not healthy:
+        raise typer.Exit(EXIT_RUNTIME_ERROR)

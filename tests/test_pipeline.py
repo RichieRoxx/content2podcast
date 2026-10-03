@@ -317,6 +317,27 @@ def test_work_directories_of_published_episodes_are_cleaned_up(env):
     assert not episode_work_dir(env["config"].paths.data_dir, "fixed-guid").exists()
 
 
+@respx.mock
+def test_a_stop_request_ends_the_run_after_the_current_episode(env):
+    stop = {"flag": False}
+
+    def stop_after_first(system, user, schema):
+        stop["flag"] = True  # e.g. SIGTERM arrives while the first episode is being made
+        return canned()
+
+    pipeline = make_pipeline(env, llm=FakeLLM(stop_after_first), should_stop=lambda: stop["flag"])
+    baseline(env, pipeline)
+    route_posts(1, 2, 3)
+    respx.get(FEED).mock(
+        return_value=httpx.Response(200, content=feed((0, 24 * 30), (1, 3), (2, 2), (3, 1)))
+    )
+    summary = pipeline.run([BLOG])
+    assert len(summary.published) == 1  # the episode in progress was finished
+    assert len(repo.list_articles(env["conn"], "pending")) == 2  # the rest waits for the next run
+    assert summary.exit_code == 0
+    assert (env["config"].paths.output_dir / "feed.xml").exists()
+
+
 def test_run_summary_exit_code():
     ok = RunSummary(DiscoveryReport())
     assert ok.exit_code == 0
