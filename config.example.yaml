@@ -64,8 +64,8 @@ schedule:
   time: "05:30"            # HH:MM, local time
 
 # Providers, selected by "provider". Optional until the pipeline needs them.
-# Available now: llm "azure_foundry" (credentials AZURE_FOUNDRY_* in .env) and "fake"
-# (deterministic, for tests and dry runs). The Azure Speech TTS provider follows.
+# Available: llm "azure_foundry" and tts "azure_speech" (credentials AZURE_* in .env), plus
+# "fake" for both (deterministic, for tests and dry runs).
 # llm:
 #   provider: azure_foundry
 #   model: gpt-5.4            # deployment name
@@ -74,4 +74,11 @@ schedule:
 #   timeout_s: 120
 #   max_retries: 2
 # tts:
-#   provider: fake
+#   provider: azure_speech
+#   region: swedencentral     # default: AZURE_SPEECH_REGION
+#   endpoint: null            # custom domain / override, default: AZURE_SPEECH_ENDPOINT
+#   output_format: audio-24khz-96kbitrate-mono-mp3
+#   max_chars_per_request: 2000
+#   timeout_s: 60
+#   max_retries: 3
+#   # styles: [neutral, excited, sad, ...]   # defaults to the MAI-Voice emotion styles
