@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1
 
 FROM python:3.12-slim-bookworm AS builder
-RUN pip install --no-cache-dir uv==0.8.17
+# The official uv binary, pinned. The Python base stays the same as in the runtime stage, so the
+# virtualenv built here works there unchanged.
+COPY --from=ghcr.io/astral-sh/uv:0.8.17 /uv /uvx /bin/
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=0

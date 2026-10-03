@@ -98,3 +98,14 @@ def test_docs_describe_the_volumes_and_the_build_arguments():
     for needle in ("/config", "/data", "/srv/podcast", "--build-arg UID=$(id -u)", "docker stop"):
         assert needle in readme
     assert re.search(r"TZ=Europe/Berlin", readme)
+
+
+def test_builder_uses_the_pinned_official_uv_binary_and_the_runtime_python():
+    builder = DOCKERFILE.split("AS builder", 1)[1].split("AS runtime", 1)[0]
+    copies = [line for line in builder.splitlines() if line.startswith("COPY --from=")]
+    assert len(copies) == 1
+    assert re.match(r"COPY --from=ghcr\.io/astral-sh/uv:\d+\.\d+\.\d+ /uv /uvx /bin/", copies[0])
+    assert "pip install" not in builder
+    # same Python base in both stages: the virtualenv is built where it will run
+    bases = re.findall(r"^FROM (\S+)", DOCKERFILE, flags=re.M)
+    assert len(bases) == 2 and bases[0] == bases[1]
