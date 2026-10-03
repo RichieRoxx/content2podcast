@@ -1,0 +1,31 @@
+{
+  "title": "Python-Pakete installieren schneller",
+  "summary": "Neue Werkzeuge machen die Installation von Python-Paketen deutlich schneller. Mia und Klaus erklären, warum.",
+  "segments": [
+    {
+      "speaker": "host",
+      "style": "cheerful",
+      "text": "Willkommen! Heute geht es um Paketmanager."
+    },
+    {
+      "speaker": "expert",
+      "style": "neutral",
+      "text": "Genau, und um die Frage, warum sie heute so schnell sind."
+    },
+    {
+      "speaker": "host",
+      "style": "serious",
+      "text": "Das hat auch mit Lock-Dateien [und Caches] zu tun."
+    }
+  ],
+  "sources": [
+    {
+      "title": "Warum Python-Pakete schneller installieren [Blog]",
+      "url": "https://blog.example.com/posts/python-speed"
+    },
+    {
+      "title": "Zweiter Artikel",
+      "url": "https://example.org/a_(b)"
+    }
+  ]
+}
