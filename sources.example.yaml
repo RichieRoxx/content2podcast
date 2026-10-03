@@ -12,3 +12,4 @@ sources:
     url: https://news.example.com/
     type: html
     selector: "article h2 a"
+    same_site: true           # default; false also keeps links to other sites

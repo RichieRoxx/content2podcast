@@ -297,6 +297,7 @@ class SourceConfig(_Model):
     selector: str | None = None
     include: list[str] = []
     exclude: list[str] = []
+    same_site: bool = True  # html: only keep links on the page's own site
     enabled: bool = True
 
     @field_validator("include", "exclude")
