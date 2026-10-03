@@ -19,6 +19,7 @@ from content2podcast.slug import slugify
 
 log = logging.getLogger(__name__)
 
+WORK_DIR = "work"
 FEED_FILENAME = "feed.xml"
 EPISODES_DIR = "episodes"
 COVER_STEM = "cover"
@@ -33,6 +34,12 @@ def short_guid(guid: str) -> str:
     return (
         cleaned[:SHORT_GUID_LENGTH] or hashlib.sha256(guid.encode()).hexdigest()[:SHORT_GUID_LENGTH]
     )
+
+
+def episode_work_dir(data_dir: Path, guid: str) -> Path:
+    """Scratch directory of one episode (script, audio parts) below ``data_dir/work``."""
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", guid) or "episode"
+    return data_dir / WORK_DIR / safe
 
 
 def episode_relpath(published: date | str, title: str, guid: str) -> str:
