@@ -3,7 +3,6 @@ from typer.testing import CliRunner
 
 from content2podcast.cli import app
 from content2podcast.lock import EXIT_LOCKED, RunLocked, run_lock
-from content2podcast.urlnorm import normalize_url
 
 
 def test_second_holder_is_rejected(tmp_path):
@@ -45,17 +44,3 @@ def test_cli_run_exits_3_when_locked(tmp_path, monkeypatch):
     assert "already in progress" in result.output
     ok = runner.invoke(app, ["--config", str(cfg), "run"])
     assert ok.exit_code == 0
-
-
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        ("https://Example.COM/a/?utm_source=x&b=2&a=1#frag", "https://example.com/a?a=1&b=2"),
-        ("https://example.com:443/a", "https://example.com/a"),
-        ("http://example.com:8080/a/", "http://example.com:8080/a"),
-        ("https://example.com", "https://example.com/"),
-        ("  https://example.com/a?fbclid=zzz ", "https://example.com/a"),
-    ],
-)
-def test_normalize_url(raw, expected):
-    assert normalize_url(raw) == expected

@@ -11,7 +11,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from content2podcast.db import utcnow
-from content2podcast.urlnorm import normalize_url
+from content2podcast.sources.normalize import normalize_url
 
 ARTICLE_STATUSES = ("baseline", "pending", "failed", "skipped", "processed")
 
