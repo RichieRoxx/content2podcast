@@ -1,0 +1,11 @@
+[Unit]
+Description=Run content2podcast every morning
+
+[Timer]
+OnCalendar=*-*-* 05:30:00
+# Catch up after the machine was off at 05:30.
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,32 @@
+[Unit]
+Description=content2podcast: turn new articles into podcast episodes
+Documentation=https://github.com/RichieRoxx/content2podcast
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=podcast
+Group=podcast
+WorkingDirectory=/var/lib/content2podcast
+EnvironmentFile=/etc/content2podcast/.env
+ExecStart=/opt/content2podcast/.venv/bin/podcast run --config /etc/content2podcast/config.yaml
+# No daily article limit, so a run with many new articles can take a while.
+TimeoutStartSec=4h
+# Exit code 3 means "another run is still in progress" (run lock): not a failure.
+SuccessExitStatus=3
+Nice=10
+
+# Hardening: the service may only write to its state and output directories.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/var/lib/content2podcast /srv/podcast
