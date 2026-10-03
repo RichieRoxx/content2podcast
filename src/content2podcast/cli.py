@@ -15,6 +15,7 @@ import typer
 
 from content2podcast import __version__
 from content2podcast import repository as repo
+from content2podcast.audio import AudioError, EpisodeMetadata, assemble_episode, find_tools
 from content2podcast.config import (
     AppConfig,
     ConfigError,
@@ -32,16 +33,17 @@ from content2podcast.lock import RunLocked, run_lock
 from content2podcast.logging_setup import setup_logging
 from content2podcast.providers.llm.base import LLMError, LLMProvider
 from content2podcast.providers.registry import ProviderNotConfiguredError, build_llm, build_tts
-from content2podcast.providers.tts.base import NEUTRAL, allowed_styles
+from content2podcast.providers.tts.base import NEUTRAL, TTSError, TTSOptions, allowed_styles
 from content2podcast.script.adhoc import fetch_article
 from content2podcast.script.dryrun import dry_run as run_dry_run
 from content2podcast.script.dryrun import dry_run_root
 from content2podcast.script.generator import ScriptArticle, generate_script
-from content2podcast.script.models import ScriptError
+from content2podcast.script.models import ScriptError, load_script
 from content2podcast.script.output import slugify, unique_dir, write_script_files
 from content2podcast.script.prompt import PromptError
 from content2podcast.sources.discovery import DiscoveryReport, SourceReport, discover
 from content2podcast.sources.models import SourceError
+from content2podcast.speech import group_by_segment, plan_script, synthesize_script
 
 EXIT_OK = 0
 EXIT_RUNTIME_ERROR = 1
@@ -372,9 +374,67 @@ def script(
 
 
 @app.command()
-def tts(ctx: typer.Context) -> None:
-    """Synthesize audio from existing scripts."""
-    _stub(ctx, "tts")
+def tts(
+    ctx: typer.Context,
+    script_file: Annotated[Path, typer.Argument(help="script.json to voice.")],
+    output: Annotated[
+        Path | None,
+        typer.Option("-o", "--output", help="MP3 to write (default: next to the script)."),
+    ] = None,
+    work_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--work-dir", help="Cache for synthesized parts (default: data_dir/tts-work)."
+        ),
+    ] = None,
+) -> None:
+    """Voice an existing script and assemble the MP3 (no database, no feed)."""
+    config = _load(ctx)
+    try:
+        script = load_script(script_file)
+    except ScriptError as exc:
+        raise _fail(str(exc), EXIT_CONFIG_ERROR) from None
+    try:
+        provider = build_tts(config.tts, ctx.obj.secrets)
+    except (ProviderNotConfiguredError, ConfigError) as exc:
+        raise _fail(str(exc), EXIT_CONFIG_ERROR) from None
+    try:
+        find_tools()  # fail before any (paid) synthesis request if ffmpeg is missing
+    except AudioError as exc:
+        raise _fail(str(exc), EXIT_RUNTIME_ERROR) from None
+
+    work_dir = work_dir or config.paths.data_dir / "tts-work"
+    output = output or script_file.with_suffix(".mp3")
+    options = (
+        config.tts if isinstance(config.tts, TTSOptions) else TTSOptions(provider=provider.name)
+    )
+    parts = plan_script(script, provider, config.roles)
+    chars = sum(len(p.text) for p in parts)
+    try:
+        paths = synthesize_script(script, provider, config.roles, work_dir, options, parts=parts)
+        result = assemble_episode(
+            group_by_segment(parts, paths),
+            output,
+            work_dir,
+            cfg=config.audio,
+            gap_ms=config.episode.gap_ms,
+            meta=EpisodeMetadata(
+                title=script.title,
+                artist=config.podcast.author,
+                album=config.podcast.title,
+                date=date.today().isoformat(),
+                comment=script.summary,
+            ),
+            intro=config.episode.intro_file,
+            outro=config.episode.outro_file,
+        )
+    except (TTSError, AudioError) as exc:
+        raise _fail(str(exc), EXIT_RUNTIME_ERROR) from None
+    typer.echo(f"Wrote {result.path}")
+    typer.echo(
+        f"  duration {result.duration_s:.1f} s, {chars} characters in {len(parts)} part(s), "
+        f"{result.size_bytes / 1024:.0f} KiB"
+    )
 
 
 @feed_app.command("rebuild")
